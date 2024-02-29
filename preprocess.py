@@ -3,7 +3,6 @@ import os
 
 def resize_images(folder, output_folder, size=(80, 40)):
     
-
     id = 0
 
     for filename in os.listdir(folder):
