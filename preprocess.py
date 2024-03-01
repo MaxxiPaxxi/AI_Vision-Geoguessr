@@ -1,7 +1,7 @@
 from PIL import Image
 import os
 
-def resize_images(folder, output_folder, size=(160, 80)):
+def resize_images(folder, output_folder, size=(240, 120)):
     
     id = 0
 

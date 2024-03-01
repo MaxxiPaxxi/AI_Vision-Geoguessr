@@ -118,7 +118,7 @@ def split_files_by_class(root_dir):
         class_path = os.path.join(root_dir, class_dir)
         files = get_files_from_directory(class_path)
 
-        if len(files)>90 and len(files)<1000:
+        if len(files)>80:
 
             total+=1
 
@@ -142,7 +142,9 @@ test_dataset = ImageDataset(test_files)
 
 # Create a counter for class frequencies
 print(train_dataset.counting_classes)
-class_counts = Counter(train_dataset.counting_classes)
+print("new:")
+print(train_dataset.new_counting_classes)
+class_counts = Counter(train_dataset.new_counting_classes)
 
 # Plotting
 classes = list(class_counts.keys())

@@ -4,6 +4,7 @@ import random
 from torchvision import transforms
 import matplotlib.pyplot as plt
 import time
+import numpy as np
 
 #1. Dataloader
 class ImageDataset(Dataset):
@@ -18,6 +19,7 @@ class ImageDataset(Dataset):
         self.class_to_idx = {}
 
         self.counting_classes = {}
+        self.new_counting_classes = {}
 
         self.patch_size_classes = {}
 
@@ -41,21 +43,24 @@ class ImageDataset(Dataset):
 
         #Get the classes that need oversampling:
         for key in self.counting_classes:
-            if self.counting_classes[key]>8000:
+            if self.counting_classes[key]>7000:
+                self.patch_size_classes[key] = 0.95
+            elif self.counting_classes[key]>5000:
                 self.patch_size_classes[key] = 1
-            elif self.counting_classes[key]>4000:
+            elif self.counting_classes[key]>3000:
                 self.patch_size_classes[key] = 2
-            elif self.counting_classes[key]>2600:
-                self.patch_size_classes[key] = 3
             elif self.counting_classes[key]>2000:
+                self.patch_size_classes[key] = 3
+            elif self.counting_classes[key]>1200:
                 self.patch_size_classes[key] = 4
-            elif self.counting_classes[key]>1000:
-                self.patch_size_classes[key] = 5
-            elif self.counting_classes[key]>80:
+            elif self.counting_classes[key]>500:
                 self.patch_size_classes[key] = 6
+            elif self.counting_classes[key]>80:
+                self.patch_size_classes[key] = 7
             else:
                 self.patch_size_classes[key] = None
 
+        print("RESIZED")
 
         #Now build the image resizing with quantity required by counting classes:
         for file in root_dir:
@@ -64,11 +69,23 @@ class ImageDataset(Dataset):
                 class_name = file.split("/")[-2]
                 image = Image.open(file).convert('RGB')
 
-                if self.counting_classes[class_name] is not None:
-                    self.images+=extract_random_patches(image, num_patches=self.counting_classes[class_name])
+                #print("hello")
 
-                    for i in range(self.counting_classes[class_name]):
-                        self.labels.append(self.class_to_idx[class_name])
+                if self.patch_size_classes[class_name] is not None:
+
+                    img = extract_random_patches(image, num_patches=self.patch_size_classes[class_name])
+                    if img is not None:
+                        self.images+=img
+
+                        #print(len(self.images), class_name, self.patch_size_classes[class_name])
+
+                        for _ in range(len(img)):
+                            self.labels.append(self.class_to_idx[class_name])
+
+                        if class_name not in self.new_counting_classes:
+                            self.new_counting_classes[class_name]=len(img)
+                        else:
+                            self.new_counting_classes[class_name]+=len(img)
        
             
     def __len__(self):
@@ -89,7 +106,7 @@ class ImageDataset(Dataset):
 
 
         #print("LABEL", label, image.shape)
-        print('SHAPE', image.shape)
+        #print('SHAPE', image.shape)
         return image, label
     
 
@@ -104,26 +121,32 @@ def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
     min_y_noise = -10
     max_y_noise = 10
 
-    
-    if num_patches==1:
-        patch = image.crop((width/2-patch_size[0]/2, height/2-patch_size[1]/2, width/2+patch_size[0]/2, height/2+patch_size[1]/2))
-        #patch = image.crop((0, 0, max_x, max_y/2))
-        #print(type(patch), type(image), image.size, patch.size)
-        #patch.show()
-        #image.show()
-        #time.sleep(10)
-        return [patch]
+    if num_patches<1:
 
-    else:
-        patches = []
-        for _ in range(num_patches):
-
-            # Random top-left corner
-            x = random.randint(min_x_start, max_x_start)
-            y = random.randint(min_y_noise, max_y_noise)
-
-            # Extract the patch
-            patch = image.crop((x, y-patch_size[1]/2, x+width, y+patch_size[1]/2))
-            patches.append(patch)
+        #In this case num-patches allows to reduce the number of images in the class
+        if np.random.random_sample()<=num_patches:
+            patch = image.crop((width/2-patch_size[0]/2, height/2-patch_size[1]/2, width/2+patch_size[0]/2, height/2+patch_size[1]/2))
+            #print(patch.size)
+            return [patch]
         
-        return patches
+        else:
+            return None
+        
+    
+    else:
+
+        if num_patches==1:
+            patch = image.crop((width/2-patch_size[0]/2, height/2-patch_size[1]/2, width/2+patch_size[0]/2, height/2+patch_size[1]/2))
+            return [patch]
+
+        else:
+            patches = []
+            for _ in range(num_patches):
+
+                x = random.randint(min_x_start, max_x_start)
+                y = random.randint(min_y_noise, max_y_noise)
+
+                patch = image.crop((x, y-patch_size[1]/2, x+patch_size[0], y+patch_size[1]/2))
+                patches.append(patch)
+            
+            return patches
