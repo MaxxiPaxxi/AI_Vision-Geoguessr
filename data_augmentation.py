@@ -146,7 +146,7 @@ def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
                 x = random.randint(min_x_start, max_x_start)
                 y = random.randint(min_y_noise, max_y_noise)
 
-                patch = image.crop((x, y-patch_size[1]/2, x+patch_size[0], y+patch_size[1]/2))
+                patch = image.crop((x, height/2+y-patch_size[1]/2, x+patch_size[0], height/2+y+patch_size[1]/2))
                 patches.append(patch)
             
             return patches

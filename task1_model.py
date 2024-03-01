@@ -177,7 +177,7 @@ if not torch.backends.mps.is_available():
 else:
     mps_device = torch.device("mps")
 
-epochs=20
+epochs=5
 
 def objective(trial: optuna.trial.Trial) -> float:
 
