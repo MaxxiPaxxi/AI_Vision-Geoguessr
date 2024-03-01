@@ -15,49 +15,14 @@ from sklearn.model_selection import train_test_split
 import optuna
 from lightning.pytorch.loggers import MLFlowLogger
 
+from collections import Counter
+import matplotlib.pyplot as plt
+
+from data_augmentation import ImageDataset
+
 batch_size = 32  # Define your batch size
 
-#1. Dataloader
-class ImageDataset(Dataset):
-    def __init__(self, root_dir, transform=None):
-        self.root_dir = root_dir
-        self.transform = transform
-        self.images = []
-        self.class_to_idx = {}
-
-        # Use a set for faster lookup
-        existing_classes = set()
-
-        # Assume root_dir is a directory. Adjust if root_dir is actually a list of files.
-        for file in root_dir:
-            if file.lower().endswith(('.png', '.jpg', '.jpeg')):
-
-                self.images.append(file)
-                class_name = file.split("/")[-2]
-
-                if class_name not in existing_classes:
-                    existing_classes.add(class_name)
-                    # Directly assign class index
-                    self.class_to_idx[class_name] = len(existing_classes) - 1
-
-
-    def __len__(self):
-        return len(self.images)
-
-    def __getitem__(self, idx):
-        img_path = self.images[idx]
-        image = Image.open(img_path).convert('RGB')
-        class_name = img_path.split("/")[-2]
-        label = self.class_to_idx[class_name]
-
-        if self.transform:
-            image = self.transform(image)
-
-
-        #print("LABEL", label, image.shape)
-        return image, label
-
-
+############################################# 1.
 class Classifier(pl.LightningModule):
     def __init__(self, a, b, c, d, e):
         super().__init__()
@@ -82,7 +47,7 @@ class Classifier(pl.LightningModule):
         self.conv5 = nn.Conv2d(in_channels=d, out_channels=e, kernel_size=(2, 5))
         self.norm5 = nn.BatchNorm2d(e)
 
-        self.linear = nn.Linear(e, 104)
+        self.linear = nn.Linear(e, 48)
 
         self.L = nn.CrossEntropyLoss()
 
@@ -100,7 +65,7 @@ class Classifier(pl.LightningModule):
         #print("4", x.shape)
         x = self.relu(self.norm5(self.conv5(x)))
         #print("5", x.shape)
-        x = x.view(batch_size, -1)
+        x = x.view(x.shape[0], -1)
         x = self.linear(x)
         #print("6", x.shape)
         return x
@@ -132,7 +97,7 @@ class Classifier(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
         return optimizer
 
-
+######################### 2.
 def get_files_from_directory(directory):
     """Recursively gets all image files from a directory and its subdirectories."""
     image_files = []
@@ -153,7 +118,7 @@ def split_files_by_class(root_dir):
         class_path = os.path.join(root_dir, class_dir)
         files = get_files_from_directory(class_path)
 
-        if len(files)>5:
+        if len(files)>90 and len(files)<1000:
 
             total+=1
 
@@ -163,29 +128,37 @@ def split_files_by_class(root_dir):
             train_files.extend(class_train)
             test_files.extend(class_test)
 
-
-    #print("total", total)
+    print("total", total)
     
     return train_files, test_files
 
 dir = '/Users/mathieugierski/Nextcloud/Macbook M3/vision/data_treated'
 train_files, test_files = split_files_by_class(dir)
 
-# Define your transformations here, if any
-transformations = transforms.Compose([
-    transforms.ToTensor(),
-    # Add more transformations as needed
-])
-
-#print(train_files)
 
 # Assuming you modify ImageDataset to accept a list of files:
-train_dataset = ImageDataset(train_files, transformations)
-test_dataset = ImageDataset(test_files, transformations)
+train_dataset = ImageDataset(train_files)
+test_dataset = ImageDataset(test_files)
+
+# Create a counter for class frequencies
+print(train_dataset.counting_classes)
+class_counts = Counter(train_dataset.counting_classes)
+
+# Plotting
+classes = list(class_counts.keys())
+counts = list(class_counts.values())
+
+plt.figure(figsize=(10, 6))
+plt.bar(classes, counts, color='skyblue')
+plt.xlabel('Class')
+plt.ylabel('Number of Elements')
+plt.title('Number of Elements in Each Class')
+plt.xticks(rotation=45)
+plt.show()
+
 
 #print("Training set size:", len(train_dataset))
 #print("Test set size:", len(test_dataset))
-
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader= DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
@@ -202,15 +175,15 @@ if not torch.backends.mps.is_available():
 else:
     mps_device = torch.device("mps")
 
-epochs=100
+epochs=20
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 10, 30, 5)
-    b = trial.suggest_int("b", 20, 40, 5)
-    c = trial.suggest_int("c", 40, 100, 10)
-    d = trial.suggest_int("d", 60, 120, 20)
-    e = trial.suggest_int("e", 100, 200, 50)
+    a = trial.suggest_int("a", 80, 100, 5)
+    b = trial.suggest_int("b", 120, 160, 10)
+    c = trial.suggest_int("c", 200, 220, 10)
+    d = trial.suggest_int("d", 240, 300, 20)
+    e = trial.suggest_int("e", 200, 500, 100)
 
     model = Classifier(a, b, c, d, e)
     model.to(mps_device)
@@ -220,7 +193,9 @@ def objective(trial: optuna.trial.Trial) -> float:
     trainer = pl.Trainer(max_epochs=epochs, accelerator="mps", logger=mlf_logger, log_every_n_steps=1)
     trainer.fit(model, train_loader , test_loader)
 
-    return None
+    val_loss = trainer.callback_metrics["val_loss"].item()
+
+    return val_loss
 
 pruner = optuna.pruners.MedianPruner()
 
