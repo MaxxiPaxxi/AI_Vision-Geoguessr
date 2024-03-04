@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 
 from data_augmentation import ImageDataset
 
-batch_size = 32  # Define your batch size
+batch_size = 256  # Define your batch size
 
 ############################################# 1.
 class Classifier(pl.LightningModule):
@@ -177,15 +177,15 @@ if not torch.backends.mps.is_available():
 else:
     mps_device = torch.device("mps")
 
-epochs=5
+epochs=10
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 80, 100, 5)
+    a = trial.suggest_int("a", 90, 120, 5)
     b = trial.suggest_int("b", 120, 160, 10)
-    c = trial.suggest_int("c", 200, 220, 10)
-    d = trial.suggest_int("d", 240, 300, 20)
-    e = trial.suggest_int("e", 200, 500, 100)
+    c = trial.suggest_int("c", 200, 240, 10)
+    d = trial.suggest_int("d", 300, 500, 20)
+    e = trial.suggest_int("e", 100, 250, 50)
 
     model = Classifier(a, b, c, d, e)
     model.to(mps_device)

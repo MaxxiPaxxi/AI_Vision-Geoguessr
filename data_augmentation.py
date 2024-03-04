@@ -1,10 +1,11 @@
-from PIL import Image
+from PIL import Image, ImageDraw
 from torch.utils.data import DataLoader, Dataset, random_split
 import random
 from torchvision import transforms
 import matplotlib.pyplot as plt
 import time
 import numpy as np
+import copy
 
 #1. Dataloader
 class ImageDataset(Dataset):
@@ -22,6 +23,7 @@ class ImageDataset(Dataset):
         self.new_counting_classes = {}
 
         self.patch_size_classes = {}
+        self.noised_classes = {}
 
         # Use a set for faster lookup
         self.existing_classes = set()
@@ -41,22 +43,37 @@ class ImageDataset(Dataset):
                 else:
                     self.counting_classes[class_name]+=1
 
-        #Get the classes that need oversampling:
+        #Get the classes that need oversampling by resizing:
         for key in self.counting_classes:
-            if self.counting_classes[key]>7000:
-                self.patch_size_classes[key] = 0.95
-            elif self.counting_classes[key]>5000:
+
+            if self.counting_classes[key]>6000:
+                self.patch_size_classes[key] = 0.85
+                self.noised_classes[key] = 1
+
+            elif self.counting_classes[key]>4000:
                 self.patch_size_classes[key] = 1
+                self.noised_classes[key] = 1
+
             elif self.counting_classes[key]>3000:
-                self.patch_size_classes[key] = 2
+                self.patch_size_classes[key] = 1
+                self.noised_classes[key] = 2
+
             elif self.counting_classes[key]>2000:
-                self.patch_size_classes[key] = 3
+                self.patch_size_classes[key] = 2
+                self.noised_classes[key] = 1
+
             elif self.counting_classes[key]>1200:
-                self.patch_size_classes[key] = 4
+                self.patch_size_classes[key] = 2
+                self.noised_classes[key] = 2
+
             elif self.counting_classes[key]>500:
-                self.patch_size_classes[key] = 6
+                self.patch_size_classes[key] = 3
+                self.noised_classes[key] = 2
+
             elif self.counting_classes[key]>80:
-                self.patch_size_classes[key] = 7
+                self.patch_size_classes[key] = 4
+                self.noised_classes[key] = 4
+
             else:
                 self.patch_size_classes[key] = None
 
@@ -86,7 +103,25 @@ class ImageDataset(Dataset):
                             self.new_counting_classes[class_name]=len(img)
                         else:
                             self.new_counting_classes[class_name]+=len(img)
-       
+
+                else:
+                    img = None
+
+                #Add Gaussian noise:
+                if img is not None:
+
+                    for i in img:
+                        width, height = image.size
+                        print(width, height)
+                        noised = add_gaussian_noise(i, n=self.noised_classes[class_name])
+                        blacked = add_black_hole(i, n = self.noised_classes[class_name])
+                        self.images+=noised
+                        self.images+=blacked
+                        self.new_counting_classes[class_name]+=len(noised)+len(blacked)
+
+                        for _ in range(len(noised)+len(blacked)):
+                            self.labels.append(self.class_to_idx[class_name])
+                        
             
     def __len__(self):
         return len(self.images)
@@ -109,7 +144,7 @@ class ImageDataset(Dataset):
         #print('SHAPE', image.shape)
         return image, label
     
-
+################## 2. Make sub-images
 def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
     width, height = image.size
     
@@ -118,8 +153,8 @@ def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
     min_x_start = 0
     max_x_start = width - patch_size[0]
 
-    min_y_noise = -10
-    max_y_noise = 10
+    min_y_noise = -12
+    max_y_noise = 12
 
     if num_patches<1:
 
@@ -150,3 +185,48 @@ def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
                 patches.append(patch)
             
             return patches
+
+      
+################### 3. Add gaussian noise
+def add_gaussian_noise(image, mean=0, std=0.05, n=1):
+
+    result = []
+
+    for _ in range(n):
+
+        np_image = np.array(image)
+        noise = 255 * np.random.normal(mean, std, np_image.shape)
+        noisy_image = np_image + noise
+        noisy_image = np.clip(noisy_image, 0, 255)
+        noisy_image = Image.fromarray(noisy_image.astype(np.uint8))
+
+        #noisy_image.show()
+        #time.sleep(5)
+        result.append(noisy_image)
+    
+    return result
+
+################# 4. Add black hole
+def add_black_hole(image, n=1):
+
+    width, height = image.size
+    result = []
+
+    for _ in range(n):
+
+        center = (np.random.randint(0, width-1), np.random.randint(0, height-1))
+        radius = np.random.randint(8, 25)
+
+        new = copy.deepcopy(image)
+        draw = ImageDraw.Draw(new)
+        left_up_point = (center[0] - radius, center[1] - radius)
+        right_down_point = (center[0] + radius, center[1] + radius)
+        
+        draw.ellipse([left_up_point, right_down_point], fill="black")
+
+        result.append(new)
+        #new.show()
+        #print(center, radius)
+        #time.sleep(5)
+    
+    return result
