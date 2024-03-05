@@ -28,6 +28,8 @@ class ImageDataset(Dataset):
         # Use a set for faster lookup
         self.existing_classes = set()
 
+        self.maxi = 10000
+
         # Assume root_dir is a directory. Adjust if root_dir is actually a list of files.
         for file in root_dir:
             if file.lower().endswith(('.png', '.jpg', '.jpeg')):
@@ -46,36 +48,34 @@ class ImageDataset(Dataset):
         #Get the classes that need oversampling by resizing:
         for key in self.counting_classes:
 
-            if self.counting_classes[key]>6000:
-                self.patch_size_classes[key] = 0.85
-                self.noised_classes[key] = 1
-
-            elif self.counting_classes[key]>4000:
-                self.patch_size_classes[key] = 1
-                self.noised_classes[key] = 1
+            if self.counting_classes[key]>4000:
+                a, b = max_allowed(8000, self.maxi)
 
             elif self.counting_classes[key]>3000:
-                self.patch_size_classes[key] = 1
-                self.noised_classes[key] = 2
+                a, b = max_allowed(4000, self.maxi)
 
             elif self.counting_classes[key]>2000:
-                self.patch_size_classes[key] = 2
-                self.noised_classes[key] = 1
+                a, b = max_allowed(3000, self.maxi)
 
             elif self.counting_classes[key]>1200:
-                self.patch_size_classes[key] = 2
-                self.noised_classes[key] = 2
+                a, b = max_allowed(2000, self.maxi)
 
             elif self.counting_classes[key]>500:
-                self.patch_size_classes[key] = 3
-                self.noised_classes[key] = 2
+                a, b = max_allowed(1200, self.maxi)
 
-            elif self.counting_classes[key]>80:
-                self.patch_size_classes[key] = 4
-                self.noised_classes[key] = 4
+            elif self.counting_classes[key]>200:
+                a, b = max_allowed(500, self.maxi)
+
+            elif self.counting_classes[key]>60:
+                a, b = max_allowed(200, self.maxi)
 
             else:
-                self.patch_size_classes[key] = None
+                a, b = None, None
+
+
+            self.patch_size_classes[key] = b
+            self.noised_classes[key] = a
+
 
         print("RESIZED")
 
@@ -112,7 +112,7 @@ class ImageDataset(Dataset):
 
                     for i in img:
                         width, height = image.size
-                        print(width, height)
+                        #print(width, height)
                         noised = add_gaussian_noise(i, n=self.noised_classes[class_name])
                         blacked = add_black_hole(i, n = self.noised_classes[class_name])
                         self.images+=noised
@@ -143,6 +143,27 @@ class ImageDataset(Dataset):
         #print("LABEL", label, image.shape)
         #print('SHAPE', image.shape)
         return image, label
+
+#################### get how many samples we want
+def max_allowed(n, maxi):
+
+    b = 1
+    a = 1
+
+    if n*(1+2*a)*b>2*maxi:
+        b = 0.8
+        return a, b
+        
+
+    while n*(1+2*a)*b<=maxi:
+
+        a+=1
+        if a>3:
+            b+=1
+            a=1
+
+    return a, b
+
     
 ################## 2. Make sub-images
 def extract_random_patches(image, patch_size=(80, 40), num_patches=5):

@@ -20,11 +20,11 @@ import matplotlib.pyplot as plt
 
 from data_augmentation import ImageDataset
 
-batch_size = 256  # Define your batch size
+batch_size = 512  # Define your batch size
 
 ############################################# 1.
 class Classifier(pl.LightningModule):
-    def __init__(self, a, b, c, d, e):
+    def __init__(self, a, b, c, d, n_classes):
         super().__init__()
 
         self.epochh=0
@@ -38,16 +38,16 @@ class Classifier(pl.LightningModule):
         self.conv2 = nn.Conv2d(in_channels=a, out_channels=b, kernel_size=4, padding=1, stride=2) #40, 20
         self.norm2 = nn.BatchNorm2d(b)
 
-        self.conv3 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=4, padding=1, stride=2) #20, 10
-        self.norm3 = nn.BatchNorm2d(c)
+        #self.conv3 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=4, padding=1, stride=2) #20, 10
+        #self.norm3 = nn.BatchNorm2d(c)
 
-        self.conv4 = nn.Conv2d(in_channels=c, out_channels=d, kernel_size=4, padding=1, stride=2) #10, 5
-        self.norm4 = nn.BatchNorm2d(d)
+        #self.conv4 = nn.Conv2d(in_channels=c, out_channels=d, kernel_size=4, padding=1, stride=2) #10, 5
+        #self.norm4 = nn.BatchNorm2d(d)
 
-        self.conv5 = nn.Conv2d(in_channels=d, out_channels=e, kernel_size=(2, 5))
-        self.norm5 = nn.BatchNorm2d(e)
+        self.conv5 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=(10, 20))
+        self.norm5 = nn.BatchNorm2d(c)
 
-        self.linear = nn.Linear(e, 48)
+        self.linear = nn.Linear(c, n_classes)
 
         self.L = nn.CrossEntropyLoss()
 
@@ -59,9 +59,9 @@ class Classifier(pl.LightningModule):
         #print("1", x.shape)
         x = self.relu(self.norm2(self.conv2(x)))
         #print("2", x.shape) 
-        x = self.relu(self.norm3(self.conv3(x)))
+        #x = self.relu(self.norm3(self.conv3(x)))
         #print("3", x.shape)
-        x = self.relu(self.norm4(self.conv4(x)))
+        #x = self.relu(self.norm4(self.conv4(x)))
         #print("4", x.shape)
         x = self.relu(self.norm5(self.conv5(x)))
         #print("5", x.shape)
@@ -94,7 +94,7 @@ class Classifier(pl.LightningModule):
     def configure_optimizers(self):
 
         # Optimizer and LR scheduler
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.001)
+        optimizer = torch.optim.Adam(self.parameters(), lr=0.001, weight_decay=1e-5)
         return optimizer
 
 ######################### 2.
@@ -118,7 +118,7 @@ def split_files_by_class(root_dir):
         class_path = os.path.join(root_dir, class_dir)
         files = get_files_from_directory(class_path)
 
-        if len(files)>80:
+        if len(files)>60:
 
             total+=1
 
@@ -130,10 +130,10 @@ def split_files_by_class(root_dir):
 
     print("total", total)
     
-    return train_files, test_files
+    return train_files, test_files, total
 
 dir = '/Users/mathieugierski/Nextcloud/Macbook M3/vision/data_treated'
-train_files, test_files = split_files_by_class(dir)
+train_files, test_files, n_classes = split_files_by_class(dir)
 
 
 # Assuming you modify ImageDataset to accept a list of files:
@@ -177,17 +177,18 @@ if not torch.backends.mps.is_available():
 else:
     mps_device = torch.device("mps")
 
-epochs=10
+epochs=20
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 90, 120, 5)
-    b = trial.suggest_int("b", 120, 160, 10)
-    c = trial.suggest_int("c", 200, 240, 10)
-    d = trial.suggest_int("d", 300, 500, 20)
-    e = trial.suggest_int("e", 100, 250, 50)
+    a = trial.suggest_int("a", 2, 4, 2)
+    b = trial.suggest_int("b", 2, 4, 2)
+    c = trial.suggest_int("c", 2, 4, 2)
+    #d = trial.suggest_int("d", 10, 120, 10)
+    d=0
+    #e = trial.suggest_int("e", 10, 120, 10)
 
-    model = Classifier(a, b, c, d, e)
+    model = Classifier(a, b, c, d, n_classes)
     model.to(mps_device)
 
     mlf_logger = MLFlowLogger(experiment_name="lightning_logs", tracking_uri="file:./ml-runs")
@@ -202,7 +203,7 @@ def objective(trial: optuna.trial.Trial) -> float:
 pruner = optuna.pruners.MedianPruner()
 
 study = optuna.create_study(direction="minimize", pruner=pruner)
-study.optimize(objective, n_trials=10)
+study.optimize(objective, n_trials=20)
 
 print(f"Number of finished trials: {len(study.trials)}")
 
