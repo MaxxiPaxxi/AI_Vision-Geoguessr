@@ -32,19 +32,17 @@ class Classifier(pl.LightningModule):
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=a, kernel_size=4, padding=1, stride=2) #80, 40
+        #Starting with:
+        #40, 80
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=a, kernel_size=4, padding=1, stride=2)#20, 40
         self.norm1 = nn.BatchNorm2d(a)
+        self.pool1 = nn.MaxPool2d(2, 2) #10, 20
 
-        self.conv2 = nn.Conv2d(in_channels=a, out_channels=b, kernel_size=4, padding=1, stride=2) #40, 20
+        self.conv2 = nn.Conv2d(in_channels=a, out_channels=b, kernel_size=4, padding=1, stride=2) #5, 10
         self.norm2 = nn.BatchNorm2d(b)
+        self.pool2 = nn.MaxPool2d(2, 2) #2, 5
 
-        #self.conv3 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=4, padding=1, stride=2) #20, 10
-        #self.norm3 = nn.BatchNorm2d(c)
-
-        #self.conv4 = nn.Conv2d(in_channels=c, out_channels=d, kernel_size=4, padding=1, stride=2) #10, 5
-        #self.norm4 = nn.BatchNorm2d(d)
-
-        self.conv5 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=(10, 20))
+        self.conv5 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=(2, 5))
         self.norm5 = nn.BatchNorm2d(c)
 
         self.linear = nn.Linear(c, n_classes)
@@ -53,21 +51,34 @@ class Classifier(pl.LightningModule):
 
 
     def forward(self, x):
+
+        if x.shape[0]>1:
         
-        #print("0", x.shape)
-        x = self.relu(self.norm1(self.conv1(x)))
-        #print("1", x.shape)
-        x = self.relu(self.norm2(self.conv2(x)))
-        #print("2", x.shape) 
-        #x = self.relu(self.norm3(self.conv3(x)))
-        #print("3", x.shape)
-        #x = self.relu(self.norm4(self.conv4(x)))
-        #print("4", x.shape)
-        x = self.relu(self.norm5(self.conv5(x)))
-        #print("5", x.shape)
-        x = x.view(x.shape[0], -1)
-        x = self.linear(x)
-        #print("6", x.shape)
+            x = self.relu(self.norm1(self.conv1(x)))
+            x = self.pool1(x)
+
+            x = self.relu(self.norm2(self.conv2(x)))
+            x = self.pool2(x)
+
+            x = self.relu(self.norm5(self.conv5(x)))
+
+            x = x.view(x.shape[0], -1)
+            x = self.linear(x)
+
+        else:
+
+            x = self.relu(self.conv1(x))
+            x = self.pool1(x)
+
+            x = self.relu(self.conv2(x))
+            x = self.pool2(x)
+
+            x = self.relu(self.conv5(x))
+
+            x = x.view(x.shape[0], -1)
+            x = self.linear(x)
+
+
         return x
     
     def _step(self, batch, batch_idx):
@@ -177,13 +188,14 @@ if not torch.backends.mps.is_available():
 else:
     mps_device = torch.device("mps")
 
-epochs=20
+epochs=15
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 2, 4, 2)
-    b = trial.suggest_int("b", 2, 4, 2)
-    c = trial.suggest_int("c", 2, 4, 2)
+    a = trial.suggest_int("a", 5, 15, 5)
+    b = trial.suggest_int("b", 5, 20, 5)
+    c = trial.suggest_int("c", 5, 45, 10)
+    #c = 0
     #d = trial.suggest_int("d", 10, 120, 10)
     d=0
     #e = trial.suggest_int("e", 10, 120, 10)

@@ -48,26 +48,28 @@ class ImageDataset(Dataset):
         #Get the classes that need oversampling by resizing:
         for key in self.counting_classes:
 
-            if self.counting_classes[key]>4000:
+            if self.counting_classes[key]>1500:#4000
                 a, b = max_allowed(8000, self.maxi)
 
-            elif self.counting_classes[key]>3000:
-                a, b = max_allowed(4000, self.maxi)
+                """
+                elif self.counting_classes[key]>3000:
+                    a, b = max_allowed(4000, self.maxi)
 
-            elif self.counting_classes[key]>2000:
-                a, b = max_allowed(3000, self.maxi)
+                elif self.counting_classes[key]>2000:
+                    a, b = max_allowed(3000, self.maxi)
 
-            elif self.counting_classes[key]>1200:
-                a, b = max_allowed(2000, self.maxi)
+                elif self.counting_classes[key]>1200:
+                    a, b = max_allowed(2000, self.maxi)
 
-            elif self.counting_classes[key]>500:
-                a, b = max_allowed(1200, self.maxi)
+                elif self.counting_classes[key]>500:
+                    a, b = max_allowed(1200, self.maxi)
 
-            elif self.counting_classes[key]>200:
-                a, b = max_allowed(500, self.maxi)
+                elif self.counting_classes[key]>200:
+                    a, b = max_allowed(500, self.maxi)
 
-            elif self.counting_classes[key]>60:
-                a, b = max_allowed(200, self.maxi)
+                elif self.counting_classes[key]>60:
+                    a, b = max_allowed(200, self.maxi)
+                """
 
             else:
                 a, b = None, None
