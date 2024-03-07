@@ -28,7 +28,7 @@ class ResNetLightning(pl.LightningModule):
     def __init__(self, num_classes):
         super(ResNetLightning, self).__init__()
         # Initialize ResNet18
-        self.model = resnet18(pretrained=True)
+        self.model = resnet18()
         num_ftrs = self.model.fc.in_features
         self.model.fc = nn.Linear(num_ftrs, num_classes)
 
@@ -41,16 +41,16 @@ class ResNetLightning(pl.LightningModule):
         x, y = batch
         logits = self.forward(x)
         loss = F.cross_entropy(logits, y)
-        self.log('train_loss', loss)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         # Implement the validation logic here
         x, y = batch
         logits = self.forward(x)
-        loss = F.cross_entropy(logits, y)
-        self.log('val_loss', loss)
-        return loss
+        val_loss = F.cross_entropy(logits, y)
+        self.log('val_loss', val_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        return val_loss
 
     def configure_optimizers(self):
         # Define and return optimizer
@@ -141,8 +141,8 @@ else:
 epochs=15
 
 model = ResNetLightning(num_classes=n_classes)
-print("features", model.fc)
-num_ftrs = model.fc.in_features
+print("features", model.model.fc)
+num_ftrs = model.model.fc.in_features
 model.fc = nn.Linear(num_ftrs, n_classes)  # Assuming 10 classes in your dataset
 model.to(mps_device)
 

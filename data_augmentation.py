@@ -1,4 +1,4 @@
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 from torch.utils.data import DataLoader, Dataset, random_split
 import random
 from torchvision import transforms
@@ -48,32 +48,10 @@ class ImageDataset(Dataset):
         #Get the classes that need oversampling by resizing:
         for key in self.counting_classes:
 
-            if self.counting_classes[key]>1500:#4000
-                a, b = max_allowed(8000, self.maxi)
-
-                """
-                elif self.counting_classes[key]>3000:
-                    a, b = max_allowed(4000, self.maxi)
-
-                elif self.counting_classes[key]>2000:
-                    a, b = max_allowed(3000, self.maxi)
-
-                elif self.counting_classes[key]>1200:
-                    a, b = max_allowed(2000, self.maxi)
-
-                elif self.counting_classes[key]>500:
-                    a, b = max_allowed(1200, self.maxi)
-
-                elif self.counting_classes[key]>200:
-                    a, b = max_allowed(500, self.maxi)
-
-                elif self.counting_classes[key]>60:
-                    a, b = max_allowed(200, self.maxi)
-                """
-
+            if self.counting_classes[key]>60:
+                a, b = max_allowed(self.counting_classes[key], self.maxi)
             else:
                 a, b = None, None
-
 
             self.patch_size_classes[key] = b
             self.noised_classes[key] = a
@@ -92,9 +70,18 @@ class ImageDataset(Dataset):
 
                 if self.patch_size_classes[class_name] is not None:
 
-                    img = extract_random_patches(image, num_patches=self.patch_size_classes[class_name])
+                    patch_size = self.patch_size_classes[class_name]
+                    img = extract_random_patches(image, num_patches=patch_size)
+
                     if img is not None:
-                        self.images+=img
+                        
+                        if patch_size!=1: #Adding the symmetric
+
+                            n = len(img)
+                            for i in range(n):
+                                img.append(ImageOps.mirror(img[i]))
+
+                        self.images+=img 
 
                         #print(len(self.images), class_name, self.patch_size_classes[class_name])
 
@@ -109,11 +96,10 @@ class ImageDataset(Dataset):
                 else:
                     img = None
 
-                #Add Gaussian noise:
+                #Add Gaussian noise and black circle:
                 if img is not None:
 
                     for i in img:
-                        width, height = image.size
                         #print(width, height)
                         noised = add_gaussian_noise(i, n=self.noised_classes[class_name])
                         blacked = add_black_hole(i, n = self.noised_classes[class_name])
