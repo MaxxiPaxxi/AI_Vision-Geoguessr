@@ -20,6 +20,8 @@ import matplotlib.pyplot as plt
 
 from data_augmentation import ImageDataset
 
+import torchmetrics
+
 batch_size = 512  # Define your batch size
 
 ############################################# 1.
@@ -49,8 +51,13 @@ class Classifier(pl.LightningModule):
 
         self.L = nn.CrossEntropyLoss()
 
+        self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
+        self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
+
 
     def forward(self, x):
+
+        x = x.to(mps_device)
 
         if x.shape[0]>1:
         
@@ -78,7 +85,6 @@ class Classifier(pl.LightningModule):
             x = x.view(x.shape[0], -1)
             x = self.linear(x)
 
-
         return x
     
     def _step(self, batch, batch_idx):
@@ -93,6 +99,10 @@ class Classifier(pl.LightningModule):
         # Called to compute and log the training loss
         loss = self._step(batch, batch_idx)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+
+        self.train_acc(self(batch[0]),batch[-1] )
+        self.log('train_acc', self.train_acc, on_step=True, on_epoch=True)
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -100,6 +110,9 @@ class Classifier(pl.LightningModule):
         # Called to compute and log the validation loss
         val_loss = self._step(batch, batch_idx)
         self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+        self.val_acc(self(batch[0]), batch[-1] )
+        self.log('val_acc', self.val_acc, on_step=True, on_epoch=True)
         return val_loss
 
     def configure_optimizers(self):
@@ -107,6 +120,7 @@ class Classifier(pl.LightningModule):
         # Optimizer and LR scheduler
         optimizer = torch.optim.Adam(self.parameters(), lr=0.001, weight_decay=1e-5)
         return optimizer
+    
 
 ######################### 2.
 def get_files_from_directory(directory):
@@ -192,9 +206,9 @@ epochs=15
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 5, 15, 5)
-    b = trial.suggest_int("b", 5, 20, 5)
-    c = trial.suggest_int("c", 5, 45, 10)
+    a = trial.suggest_int("a", 12, 13, 1)
+    b = trial.suggest_int("b", 25, 26, 1)
+    c = trial.suggest_int("c", 50, 51, 1)
     #c = 0
     #d = trial.suggest_int("d", 10, 120, 10)
     d=0

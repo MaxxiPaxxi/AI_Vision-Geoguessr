@@ -48,7 +48,7 @@ class ImageDataset(Dataset):
         #Get the classes that need oversampling by resizing:
         for key in self.counting_classes:
 
-            if self.counting_classes[key]>60:
+            if self.counting_classes[key]>60:#60
                 a, b = max_allowed(self.counting_classes[key], self.maxi)
             else:
                 a, b = None, None
@@ -62,6 +62,8 @@ class ImageDataset(Dataset):
         #Now build the image resizing with quantity required by counting classes:
         for file in root_dir:
             if file.lower().endswith(('.png', '.jpg', '.jpeg')):
+
+                print(len(self.images))
 
                 class_name = file.split("/")[-2]
                 image = Image.open(file).convert('RGB')
@@ -109,6 +111,11 @@ class ImageDataset(Dataset):
 
                         for _ in range(len(noised)+len(blacked)):
                             self.labels.append(self.class_to_idx[class_name])
+
+        for i in range(len(self.images)):
+            self.images[i] = self.transform(self.images[i]).cpu()
+
+        
                         
             
     def __len__(self):
@@ -124,9 +131,7 @@ class ImageDataset(Dataset):
         image = self.images[idx]
         label = self.labels[idx]
 
-        if self.transform:
-            image = self.transform(image)
-
+        #print("DEVICE", image.device)
 
         #print("LABEL", label, image.shape)
         #print('SHAPE', image.shape)
@@ -171,7 +176,7 @@ def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
         if np.random.random_sample()<=num_patches:
             patch = image.crop((width/2-patch_size[0]/2, height/2-patch_size[1]/2, width/2+patch_size[0]/2, height/2+patch_size[1]/2))
             #print(patch.size)
-            return [patch]
+            return [patch, make_symmetric(patch)]
         
         else:
             return None
@@ -181,7 +186,7 @@ def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
 
         if num_patches==1:
             patch = image.crop((width/2-patch_size[0]/2, height/2-patch_size[1]/2, width/2+patch_size[0]/2, height/2+patch_size[1]/2))
-            return [patch]
+            return [patch, make_symmetric(patch)]
 
         else:
             patches = []
@@ -192,8 +197,15 @@ def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
 
                 patch = image.crop((x, height/2+y-patch_size[1]/2, x+patch_size[0], height/2+y+patch_size[1]/2))
                 patches.append(patch)
+
+                patches.append(make_symmetric(patch))
             
             return patches
+        
+def make_symmetric(img):
+
+    mirrored_img = img.transpose(Image.FLIP_LEFT_RIGHT)
+    return mirrored_img
 
       
 ################### 3. Add gaussian noise
