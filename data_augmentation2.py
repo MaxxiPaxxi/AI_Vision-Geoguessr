@@ -8,7 +8,7 @@ import numpy as np
 import copy
 
 #1. Dataloader
-class ImageDataset(Dataset):
+class ImageDataset_2(Dataset):
     def __init__(self, root_dir):
 
         # Define your transformations here, if any
@@ -24,6 +24,9 @@ class ImageDataset(Dataset):
 
         self.patch_size_classes = {}
         self.noised_classes = {}
+
+        self.instructions = {} #What to do for get item
+        self.summary = {}
 
         # Use a set for faster lookup
         self.existing_classes = set()
@@ -59,75 +62,94 @@ class ImageDataset(Dataset):
 
         print("RESIZED")
 
-        #Now build the image resizing with quantity required by counting classes:
+        i = 0
 
+        #Now build the image resizing with quantity required by counting classes:
         for file in root_dir:
             if file.lower().endswith(('.png', '.jpg', '.jpeg')):
 
-                print(len(self.images))
-
                 class_name = file.split("/")[-2]
-                image = Image.open(file).convert('RGB')
-
-                #print("hello")
 
                 if self.patch_size_classes[class_name] is not None:
 
-                    patch_size = self.patch_size_classes[class_name]
-                    img = extract_random_patches(image, num_patches=patch_size)
+                    a, b = self.noised_classes[class_name], self.patch_size_classes[class_name]
 
-                    if img is not None:
-                        
-                        if patch_size!=1: #Adding the symmetric
-
-                            n = len(img)
-                            for i in range(n):
-                                img.append(ImageOps.mirror(img[i]))
-
-                        self.images+=img 
-
-                        #print(len(self.images), class_name, self.patch_size_classes[class_name])
-
-                        for _ in range(len(img)):
-                            self.labels.append(self.class_to_idx[class_name])
-
-                        if class_name not in self.new_counting_classes:
-                            self.new_counting_classes[class_name]=len(img)
+                    if b<1:
+                        if np.random.random((0,1))>b:
+                            continue
                         else:
-                            self.new_counting_classes[class_name]+=len(img)
+                            b=1
 
-                else:
-                    img = None
+                    self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 1, 0, 0, 0, 0)
+                    i+=1
 
-                #Add Gaussian noise and black circle:
-                if img is not None:
+                    for _ in range(b): #b resized images
+                        
+                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 0, 0, 0)
+                        i+=1
 
-                    for i in img:
-                        #print(width, height)
-                        noised = add_gaussian_noise(i, n=self.noised_classes[class_name])
-                        blacked = add_black_hole(i, n = self.noised_classes[class_name])
-                        self.images+=noised
-                        self.images+=blacked
-                        self.new_counting_classes[class_name]+=len(noised)+len(blacked)
+                    for _ in range(b): #b resized and symmetric images
+                        
+                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 1, 0, 0)
+                        i+=1
 
-                        for _ in range(len(noised)+len(blacked)):
-                            self.labels.append(self.class_to_idx[class_name])
+                    for _ in range(b*a): #b*a resized and noise
 
-        for i in range(len(self.images)):
-            self.images[i] = self.transform(self.images[i]).cpu()
+                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 0, 1, 0)
+                        i+=1
+
+                    for _ in range(b*a): #b*a resized symmetric and noise
+
+                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 1, 1, 0)
+                        i+=1
+
+                    for _ in range(b*a): #b*a resized and black
+
+                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 0, 0, 1)
+                        i+=1
+
+                    for _ in range(b*a): #b*a resized symmetric and black
+
+                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 1, 0, 1)
+                        i+=1
+
+                    if class_name not in self.summary:
+                        self.summary[class_name]=2*b+4*a*b+1
+
+                    else:
+                        self.summary[class_name]+=2*b+4*a*b+1
          
             
     def __len__(self):
-
-        return len(self.images)
+        return len(list(self.instructions.keys()))
+        #return len(self.images)
 
     def __getitem__(self, idx):
 
-        image = self.images[idx]
-        label = self.labels[idx]
-        
-        return image, label
+        instruction = self.instructions[idx]
+        file = instruction[0]
+        label = instruction[1]
+        a = instruction[2]
+        b = instruction[3]
 
+        image = Image.open(file).convert('RGB')
+
+        if instruction[4]==1:
+            img = extract_random_patches(image, num_patches=1)[0]
+
+        else:
+            img = extract_random_patches(image, num_patches=b)[np.random.randint(b)]
+
+            if instruction[6]==1:
+                img = make_symmetric(img)
+
+            if instruction[7]==1:
+                img = add_gaussian_noise(img)[0]
+
+            if instruction[8]==1:
+                img = add_black_hole(img)[0]
+            
+        return self.transform(img), label
 
 
 #################### get how many samples we want

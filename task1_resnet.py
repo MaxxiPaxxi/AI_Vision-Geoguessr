@@ -3,7 +3,7 @@ from PIL import Image
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader, Dataset, random_split
-from torchvision.models import resnet18
+from torchvision.models import resnet50
 
 import torch
 import torch.nn as nn
@@ -19,7 +19,7 @@ from lightning.pytorch.loggers import MLFlowLogger
 from collections import Counter
 import matplotlib.pyplot as plt
 
-from data_augmentation import ImageDataset
+from data_augmentation2 import ImageDataset_2
 
 import torchmetrics
 
@@ -30,9 +30,16 @@ class ResNetLightning(pl.LightningModule):
     def __init__(self, num_classes):
         super(ResNetLightning, self).__init__()
         # Initialize ResNet18
-        self.model = resnet18()
+        self.model = resnet50()
         num_ftrs = self.model.fc.in_features
         self.model.fc = nn.Linear(num_ftrs, num_classes)
+
+        #print("state_dict", self.model.state_dict())
+        dropout_p=0.4
+        self.model.layer1 = nn.Sequential(self.model.layer1, nn.Dropout(dropout_p))
+        self.model.layer2 = nn.Sequential(self.model.layer2, nn.Dropout(dropout_p))
+        self.model.layer3 = nn.Sequential(self.model.layer3, nn.Dropout(dropout_p))
+        self.model.layer4 = nn.Sequential(self.model.layer4, nn.Dropout(dropout_p))
 
         self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
         self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
@@ -109,9 +116,11 @@ train_files, test_files, n_classes = split_files_by_class(dir)
 
 
 # Assuming you modify ImageDataset to accept a list of files:
-train_dataset = ImageDataset(train_files)
-test_dataset = ImageDataset(test_files)
+train_dataset = ImageDataset_2(train_files)
+test_dataset = ImageDataset_2(test_files)
 
+
+"""
 # Create a counter for class frequencies
 print(train_dataset.counting_classes)
 print("new:")
@@ -121,6 +130,11 @@ class_counts = Counter(train_dataset.new_counting_classes)
 # Plotting
 classes = list(class_counts.keys())
 counts = list(class_counts.values())
+"""
+
+classes = list(train_dataset.summary.keys())
+counts = list(train_dataset.summary.values())
+
 
 plt.figure(figsize=(10, 6))
 plt.bar(classes, counts, color='skyblue')
@@ -128,7 +142,7 @@ plt.xlabel('Class')
 plt.ylabel('Number of Elements')
 plt.title('Number of Elements in Each Class')
 plt.xticks(rotation=45)
-plt.show()
+#plt.show()
 
 
 #print("Training set size:", len(train_dataset))

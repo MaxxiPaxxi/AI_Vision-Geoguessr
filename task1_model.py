@@ -18,7 +18,7 @@ from lightning.pytorch.loggers import MLFlowLogger
 from collections import Counter
 import matplotlib.pyplot as plt
 
-from data_augmentation import ImageDataset
+from data_augmentation2 import ImageDataset_2
 
 import torchmetrics
 
@@ -162,9 +162,11 @@ train_files, test_files, n_classes = split_files_by_class(dir)
 
 
 # Assuming you modify ImageDataset to accept a list of files:
-train_dataset = ImageDataset(train_files)
-test_dataset = ImageDataset(test_files)
+train_dataset = ImageDataset_2(train_files)
+test_dataset = ImageDataset_2(test_files)
 
+
+"""
 # Create a counter for class frequencies
 print(train_dataset.counting_classes)
 print("new:")
@@ -174,6 +176,10 @@ class_counts = Counter(train_dataset.new_counting_classes)
 # Plotting
 classes = list(class_counts.keys())
 counts = list(class_counts.values())
+"""
+
+classes = list(train_dataset.summary.keys())
+counts = list(train_dataset.summary.values())
 
 plt.figure(figsize=(10, 6))
 plt.bar(classes, counts, color='skyblue')
