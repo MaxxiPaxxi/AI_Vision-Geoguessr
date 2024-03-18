@@ -7,9 +7,11 @@ from torch.utils.data import DataLoader, Dataset, random_split
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 
 import lightning as pl
 import random
+import numpy as np
 from sklearn.model_selection import train_test_split
 
 import optuna
@@ -21,6 +23,8 @@ import matplotlib.pyplot as plt
 from data_augmentation2 import ImageDataset_2
 
 import torchmetrics
+
+import copy
 
 batch_size = 512  # Define your batch size
 
@@ -34,6 +38,10 @@ class Classifier(pl.LightningModule):
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
+        self.dropout1 = nn.Dropout(0.4)
+        self.dropout2 = nn.Dropout(0.4)
+        self.dropout3 = nn.Dropout(0.4)
+
         #Starting with:
         #40, 80
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=a, kernel_size=4, padding=1, stride=2)#20, 40
@@ -44,10 +52,17 @@ class Classifier(pl.LightningModule):
         self.norm2 = nn.BatchNorm2d(b)
         self.pool2 = nn.MaxPool2d(2, 2) #2, 5
 
+        ###
+        #Without cam
         self.conv5 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=(2, 5))
         self.norm5 = nn.BatchNorm2d(c)
 
         self.linear = nn.Linear(c, n_classes)
+
+        #With cam
+        self.gap_mlp = nn.Linear(b, n_classes)
+
+        ###
 
         self.L = nn.CrossEntropyLoss()
 
@@ -55,7 +70,7 @@ class Classifier(pl.LightningModule):
         self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
 
 
-    def forward(self, x):
+    def forward(self, x, cam=False):
 
         x = x.to(mps_device)
 
@@ -63,28 +78,46 @@ class Classifier(pl.LightningModule):
         
             x = self.relu(self.norm1(self.conv1(x)))
             x = self.pool1(x)
+            x = self.dropout1(x)
 
             x = self.relu(self.norm2(self.conv2(x)))
             x = self.pool2(x)
+            x = self.dropout2(x)
 
-            x = self.relu(self.norm5(self.conv5(x)))
+            if cam:
+                x_cam = torch.mean(x, dim = (2,3))
+                x_cam = self.gap_mlp(x_cam)
 
-            x = x.view(x.shape[0], -1)
-            x = self.linear(x)
+            else:
+                x = self.relu(self.norm5(self.conv5(x)))
+                x = self.dropout3(x)
+
+                x = x.view(x.shape[0], -1)
+                x = self.linear(x)
 
         else:
 
             x = self.relu(self.conv1(x))
             x = self.pool1(x)
+            x = self.dropout1(x)
 
             x = self.relu(self.conv2(x))
             x = self.pool2(x)
+            x = self.dropout2(x)
 
-            x = self.relu(self.conv5(x))
+            if cam:
+                x_cam = torch.mean(x, dim = (2,3))
+                x_cam = self.gap_mlp(x_cam)
 
-            x = x.view(x.shape[0], -1)
-            x = self.linear(x)
+            else:
+                x = self.relu(self.conv5(x))
+                x = self.dropout3(x)
 
+                x = x.view(x.shape[0], -1)
+                x = self.linear(x)
+
+        if cam:
+            return x, x_cam
         return x
     
     def _step(self, batch, batch_idx):
@@ -121,6 +154,71 @@ class Classifier(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=0.001, weight_decay=1e-5)
         return optimizer
     
+    def on_train_epoch_start(self):
+
+        img, classe = test_dataset[0]
+
+
+        saving_img = copy.deepcopy(img)
+        print(saving_img.shape)
+        
+
+        with torch.no_grad():
+            # Get predictions and CAMs for these images
+            conved_img, pred = self(img.unsqueeze(0), cam=True)
+            cam = self.generate_cam(conved_img, pred.argmax(dim=1))  # Implement generate_cam based on the steps provided
+            # Plotting code here: Display original image with CAM overlay
+
+        img_np = img.squeeze().cpu().detach().numpy().transpose(1, 2, 0)
+        img_np = (img_np - img_np.min()) / (img_np.max() - img_np.min())  # Normalize to [0, 1]
+
+        cam_resized = plt.cm.jet(cam.cpu().detach().numpy().squeeze())[:, :, :3]  # Apply colormap and remove alpha
+        cam_resized = (cam_resized * 255).astype(np.uint8)  # Convert to uint8
+
+        # Resize CAM to match the original image size if necessary
+        cam_resized = np.array(Image.fromarray(cam_resized).resize((img_np.shape[1], img_np.shape[0]), Image.BILINEAR))
+
+        overlay_img = ((cam_resized.astype(np.float32) * 0.5) + (img_np.astype(np.float32) * 0.5)).astype(np.uint8)
+
+
+        # Ensure the output directory exists
+        output_dir = 'cam_outputs'
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        if self.epochh==0:
+            output_path = os.path.join(output_dir, f'original_image.png')
+            saving_img = (saving_img * 255)  # Convert to uint8
+            pil_image = TF.to_pil_image(saving_img)
+            pil_image.save(output_path, inplace=True)
+
+        # Save the image
+        output_path = os.path.join(output_dir, f'CAM_{self.epochh}.png')
+        Image.fromarray(overlay_img).save(output_path)
+
+        self.epochh+=1
+
+
+        """
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(img_np)
+        plt.title("Original Image")
+        plt.subplot(1, 2, 2)
+        plt.imshow(img_np)
+        plt.imshow(cam_resized, alpha=0.5, interpolation='bilinear')  # Overlay CAM
+        plt.title(f"CAM for class {classe}")
+        plt.show()
+        """
+    
+    def generate_cam(self, feature_maps, pred_class):
+        # Get the weight of the `linear` layer for the predicted class
+        W = self.gap_mlp.weight[pred_class,:].view(self.gap_mlp.weight.shape[1], 1, 1)
+        feature_maps = feature_maps.view(feature_maps.shape[1], feature_maps.shape[2], feature_maps.shape[3])
+        cam = feature_maps*W
+        cam = cam.sum(dim=0)
+        return cam
+
 
 ######################### 2.
 def get_files_from_directory(directory):
@@ -187,7 +285,7 @@ plt.xlabel('Class')
 plt.ylabel('Number of Elements')
 plt.title('Number of Elements in Each Class')
 plt.xticks(rotation=45)
-plt.show()
+#plt.show()
 
 
 #print("Training set size:", len(train_dataset))
@@ -208,13 +306,13 @@ if not torch.backends.mps.is_available():
 else:
     mps_device = torch.device("mps")
 
-epochs=15
+epochs=100
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 12, 13, 1)
-    b = trial.suggest_int("b", 25, 26, 1)
-    c = trial.suggest_int("c", 50, 51, 1)
+    a = trial.suggest_int("a", 22, 23, 1)
+    b = trial.suggest_int("b", 40, 41, 1)
+    c = trial.suggest_int("c", 52, 53, 1)
     #c = 0
     #d = trial.suggest_int("d", 10, 120, 10)
     d=0
@@ -228,14 +326,14 @@ def objective(trial: optuna.trial.Trial) -> float:
     trainer = pl.Trainer(max_epochs=epochs, accelerator="mps", logger=mlf_logger, log_every_n_steps=1)
     trainer.fit(model, train_loader , test_loader)
 
-    val_loss = trainer.callback_metrics["val_loss"].item()
+    val_acc = trainer.callback_metrics["val_acc"].item()
 
-    return val_loss
+    return val_acc
 
 pruner = optuna.pruners.MedianPruner()
 
-study = optuna.create_study(direction="minimize", pruner=pruner)
-study.optimize(objective, n_trials=20)
+study = optuna.create_study(direction="maximize", pruner=pruner)
+study.optimize(objective, n_trials=30)
 
 print(f"Number of finished trials: {len(study.trials)}")
 

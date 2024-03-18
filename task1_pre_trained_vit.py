@@ -3,13 +3,13 @@ from PIL import Image
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader, Dataset, random_split
-from torchvision.models import resnet18
+from torchvision.models import resnet50
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import lightning as pl
+import lightning as L
 import random
 from sklearn.model_selection import train_test_split
 
@@ -23,30 +23,36 @@ from data_augmentation2 import ImageDataset_2
 
 import torchmetrics
 
-batch_size = 512  # Define your batch size
+import torch.optim as optim
+
+from transformers import ViTImageProcessor, ViTForImageClassification
+import requests
+
+
+
 
 ######################### 1. 
-class ResNetLightning(pl.LightningModule):
+class PreTrainedViT(L.LightningModule):
     def __init__(self, num_classes):
-        super(ResNetLightning, self).__init__()
-        # Initialize ResNet18
-        self.model = resnet18()
-        num_ftrs = self.model.fc.in_features
-        self.model.fc = nn.Linear(num_ftrs, num_classes)
+        super(PreTrainedViT, self).__init__()
 
-        #print("state_dict", self.model.state_dict())
-        dropout_p=0.4
-        self.model.layer1 = nn.Sequential(self.model.layer1, nn.Dropout(dropout_p))
-        self.model.layer2 = nn.Sequential(self.model.layer2, nn.Dropout(dropout_p))
-        self.model.layer3 = nn.Sequential(self.model.layer3, nn.Dropout(dropout_p))
-        self.model.layer4 = nn.Sequential(self.model.layer4, nn.Dropout(dropout_p))
+        #Resize the images
+        self.resizing = transforms.Resize((224, 224))
+
+        #Pre trained ViT
+        self.model = ViTForImageClassification.from_pretrained('google/vit-base-patch16-224')
+        self.model.save_pretrained('/Users/mathieugierski/Nextcloud/Macbook M3/vision/AI_Vision-Geoguessr')
+        print(self.model)
+        self.final_mlp = nn.Linear(1000, num_classes)
 
         self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
         self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
 
     def forward(self, x):
         # Forward pass
-        return self.model(x)
+        x = self.model(x).logits
+        
+        return self.final_mlp(x)
 
     def training_step(self, batch, batch_idx):
         # Implement the training logic here
@@ -74,7 +80,6 @@ class ResNetLightning(pl.LightningModule):
         # Define and return optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
         return optimizer
-
 
 ######################### 2.
 def get_files_from_directory(directory):
@@ -116,8 +121,8 @@ train_files, test_files, n_classes = split_files_by_class(dir)
 
 
 # Assuming you modify ImageDataset to accept a list of files:
-train_dataset = ImageDataset_2(train_files)
-test_dataset = ImageDataset_2(test_files)
+train_dataset = ImageDataset_2(train_files, resizing=(224, 224))
+test_dataset = ImageDataset_2(test_files, resizing=(224, 224))
 
 
 """
@@ -145,9 +150,8 @@ plt.xticks(rotation=45)
 #plt.show()
 
 
-#print("Training set size:", len(train_dataset))
-#print("Test set size:", len(test_dataset))
 
+batch_size = 16
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader= DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
@@ -163,17 +167,14 @@ if not torch.backends.mps.is_available():
 else:
     mps_device = torch.device("mps")
 
-epochs=40
+epochs=15
 
-model = ResNetLightning(num_classes=n_classes)
-print("features", model.model.fc)
-num_ftrs = model.model.fc.in_features
-model.fc = nn.Linear(num_ftrs, n_classes)  # Assuming 10 classes in your dataset
+model = PreTrainedViT(num_classes=n_classes)
 model.to(mps_device)
 
 mlf_logger = MLFlowLogger(experiment_name="lightning_logs", tracking_uri="file:./ml-runs")
 
-trainer = pl.Trainer(max_epochs=epochs, accelerator="mps", logger=mlf_logger, log_every_n_steps=1)
+trainer = L.Trainer(max_epochs=epochs, accelerator="mps", logger=mlf_logger, log_every_n_steps=1)
 trainer.fit(model, train_loader , test_loader)
 
 val_loss = trainer.callback_metrics["val_loss"].item()

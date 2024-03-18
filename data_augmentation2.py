@@ -9,10 +9,18 @@ import copy
 
 #1. Dataloader
 class ImageDataset_2(Dataset):
-    def __init__(self, root_dir):
+    def __init__(self, root_dir, resizing = (40, 80)):
 
         # Define your transformations here, if any
-        self.transform = transforms.Compose([transforms.ToTensor()], )
+
+        if resizing is None:
+            self.transform = transforms.Compose([transforms.ToTensor()], )
+        else:
+            self.transform = transforms.Compose([
+                transforms.Resize(resizing),
+                transforms.ToTensor()
+            ])
+
        
         self.root_dir = root_dir
         self.images = []
@@ -22,9 +30,7 @@ class ImageDataset_2(Dataset):
         self.counting_classes = {}
         self.new_counting_classes = {}
 
-        self.patch_size_classes = {}
-        self.noised_classes = {}
-
+        self.planning = {}
         self.instructions = {} #What to do for get item
         self.summary = {}
 
@@ -51,13 +57,12 @@ class ImageDataset_2(Dataset):
         #Get the classes that need oversampling by resizing:
         for key in self.counting_classes:
 
-            if self.counting_classes[key]>60:#60
+            if self.counting_classes[key]>100:#100
                 a, b = max_allowed(self.counting_classes[key], self.maxi)
             else:
                 a, b = None, None
 
-            self.patch_size_classes[key] = b
-            self.noised_classes[key] = a
+            self.planning[key] = (a,b)
 
 
         print("RESIZED")
@@ -70,54 +75,114 @@ class ImageDataset_2(Dataset):
 
                 class_name = file.split("/")[-2]
 
-                if self.patch_size_classes[class_name] is not None:
+                if self.planning[class_name][0] is not None:
 
-                    a, b = self.noised_classes[class_name], self.patch_size_classes[class_name]
+                    a, b = self.planning[class_name]
+
+                    if a<1:
+                        if np.random.random((0,1))<a:
+                            a=1
+                        else:
+                            a=0
 
                     if b<1:
-                        if np.random.random((0,1))>b:
-                            continue
-                        else:
+                        if np.random.random((0,1))<b:
                             b=1
+                        else:
+                            b=0
 
+                    #1. Non-symmetric:
+                    #Itself
                     self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 1, 0, 0, 0, 0)
                     i+=1
 
-                    for _ in range(b): #b resized images
+                    for _ in range(a): #a resized images
                         
                         self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 0, 0, 0)
                         i+=1
 
-                    for _ in range(b): #b resized and symmetric images
-                        
-                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 1, 0, 0)
+                    #2. Symmetric
+                    if b !=0 :
+
+                        #Itself and symmetric
+                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 1, 0, 1, 0, 0) 
                         i+=1
 
-                    for _ in range(b*a): #b*a resized and noise
+                        for _ in range(a): #a resized and symmetric images
+                            
+                            self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 1, 0, 0)
+                            i+=1
 
-                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 0, 1, 0)
+                    ###################### #Adding robustness to the model:
+                    #3. Add the noise
+                    c = 0
+                    if np.random.random((0,1))<0.2:
+                        c=1
+                    else:
+                        c=0
+
+                    if c ==1:
+
+                        #3.1 Non-symmetric:
+                        #Itself
+                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 1, 0, 0, 1, 0)
                         i+=1
 
-                    for _ in range(b*a): #b*a resized symmetric and noise
+                        for _ in range(a): #a resized images
+                            
+                            self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 0, 1, 0)
+                            i+=1
 
-                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 1, 1, 0)
+                        #3.2 Symmetric
+                        if b !=0 :
+
+                            #Itself and symmetric
+                            self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 1, 0, 1, 1, 0) 
+                            i+=1
+
+                            for _ in range(a): #a resized and symmetric images
+                                
+                                self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 1, 1, 0)
+                                i+=1
+
+
+                    #4. Add black holes
+                    d = 0
+                    if np.random.random((0,1))<0.2:
+                        d=1
+                    else:
+                        d=0
+
+                    if d ==1:
+
+                        #4.1 Non-symmetric:
+                        #Itself
+                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 1, 0, 0, 0, 1)
                         i+=1
 
-                    for _ in range(b*a): #b*a resized and black
+                        for _ in range(a): #a resized images
+                            
+                            self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 0, 0, 1)
+                            i+=1
 
-                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 0, 0, 1)
-                        i+=1
+                        #4.2 Symmetric
+                        if b !=0 :
 
-                    for _ in range(b*a): #b*a resized symmetric and black
+                            #Itself and symmetric
+                            self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 1, 0, 1, 0, 1) 
+                            i+=1
 
-                        self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 1, 0, 1)
-                        i+=1
+                            for _ in range(a): #a resized and symmetric images
+                                
+                                self.instructions[i] = (file, self.class_to_idx[class_name], a, b, 0, 1, 1, 0, 1)
+                                i+=1
+
 
                     if class_name not in self.summary:
-                        self.summary[class_name]=2*b+4*a*b+1
+                        self.summary[class_name]=(1+a)*(1+b)*(1+c+d)
 
                     else:
-                        self.summary[class_name]+=2*b+4*a*b+1
+                        self.summary[class_name]+=(1+a)*(1+b)*(1+c+d)
          
             
     def __len__(self):
@@ -138,16 +203,19 @@ class ImageDataset_2(Dataset):
             img = extract_random_patches(image, num_patches=1)[0]
 
         else:
-            img = extract_random_patches(image, num_patches=b)[np.random.randint(b)]
+            img = extract_random_patches(image, num_patches=a)[np.random.randint(a)]
 
-            if instruction[6]==1:
-                img = make_symmetric(img)
+        if instruction[6]==1:
+            img = make_symmetric(img)
 
-            if instruction[7]==1:
-                img = add_gaussian_noise(img)[0]
+        if instruction[7]==1: #never noise
+            img = add_gaussian_noise(img)[0]
 
-            if instruction[8]==1:
-                img = add_black_hole(img)[0]
+        if instruction[8]==1: #never black hole 
+            img = add_black_hole(img)[0]
+
+        #img.show()
+        #time.sleep(3)
             
         return self.transform(img), label
 
@@ -155,26 +223,24 @@ class ImageDataset_2(Dataset):
 #################### get how many samples we want
 def max_allowed(n, maxi):
 
-    b = 1
-    a = 1
-
-    if n*(1+2*a)*b>2*maxi:
-        b = 0.8
-        return a, b
-        
-
-    while n*(1+2*a)*b<=maxi:
-
-        a+=1
-        if a>3:
-            b+=1
-            a=1
+    if n <= maxi/6:
+        a=2
+        b=1
+    elif n <= maxi/4:
+        a=1
+        b=1
+    elif n <= maxi/2:
+        a = (maxi/2-n)/(maxi/4)
+        b = 1
+    else:
+        a=0
+        b = (maxi-n)/(maxi/2)
 
     return a, b
 
     
 ################## 2. Make sub-images
-def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
+def extract_random_patches(image, patch_size=(200, 100), num_patches=5):
     width, height = image.size
     
     # Calculate the valid range for the top-left corner of a patch
@@ -182,8 +248,8 @@ def extract_random_patches(image, patch_size=(80, 40), num_patches=5):
     min_x_start = 0
     max_x_start = width - patch_size[0]
 
-    min_y_noise = -12
-    max_y_noise = 12
+    min_y_noise = -30
+    max_y_noise = 30
 
     if num_patches<1:
 
@@ -251,7 +317,7 @@ def add_black_hole(image, n=1):
     for _ in range(n):
 
         center = (np.random.randint(0, width-1), np.random.randint(0, height-1))
-        radius = np.random.randint(8, 25)
+        radius = np.random.randint(8, 15)
 
         new = copy.deepcopy(image)
         draw = ImageDraw.Draw(new)

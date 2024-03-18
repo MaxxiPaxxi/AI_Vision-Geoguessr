@@ -118,7 +118,6 @@ class VisionTransformer(nn.Module):
 
         return x
     
-
 class ViT(L.LightningModule):
     def __init__(self, model_kwargs, lr):
         super().__init__()
