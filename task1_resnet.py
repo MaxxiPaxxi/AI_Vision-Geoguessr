@@ -8,9 +8,11 @@ from torchvision.models import resnet18
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 
 import lightning as pl
 import random
+import numpy as np
 from sklearn.model_selection import train_test_split
 
 import optuna
@@ -29,6 +31,8 @@ batch_size = 512  # Define your batch size
 class ResNetLightning(pl.LightningModule):
     def __init__(self, num_classes):
         super(ResNetLightning, self).__init__()
+
+        self.epochh = 0
         # Initialize ResNet18
         self.model = resnet18()
         num_ftrs = self.model.fc.in_features
@@ -44,9 +48,28 @@ class ResNetLightning(pl.LightningModule):
         self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
         self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
 
-    def forward(self, x):
+        self.gap_mlp = nn.Linear(256, n_classes)
+
+    def forward(self, x, cam=False):
         # Forward pass
-        return self.model(x)
+
+        if cam:
+
+            with torch.no_grad():
+                x = x.to(mps_device)
+                x = self.model.conv1(x)
+                x = self.model.bn1(x)
+                x = self.model.relu(x)
+                x = self.model.maxpool(x)
+                x = self.model.layer1(x)
+                x = self.model.layer2(x)
+                x = self.model.layer3(x)
+                x_cam = torch.mean(x , dim = (2,3))
+                x_cam = self.gap_mlp(x_cam)
+            return x,x_cam
+
+        else:
+            return self.model(x)
 
     def training_step(self, batch, batch_idx):
         # Implement the training logic here
@@ -74,6 +97,70 @@ class ResNetLightning(pl.LightningModule):
         # Define and return optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
         return optimizer
+    
+    def on_train_epoch_start(self):
+
+        #img, classe = test_dataset[0]
+        img= Image.open("/Users/mathieugierski/Nextcloud/Macbook M3/vision/AI_Vision-Geoguessr/cam_outputs/original_image_['Poland'].png").convert('RGB')
+        transform = transforms.ToTensor()
+        img = transform(img)
+        dico = test_dataset.class_to_idx
+        country = "['Poland']"
+
+        pil_image = TF.to_pil_image(img)
+        
+
+        with torch.no_grad():
+            # Get predictions and CAMs for these images
+            conved_img, pred = self(img.unsqueeze(0), cam=True)
+            cam = self.generate_cam(conved_img, pred.argmax(dim=1))  # Implement generate_cam based on the steps provided
+            # Plotting code here: Display original image with CAM overlay
+
+            pred_country = [key for key, value in dico.items() if value == pred.argmax(dim=1)]
+
+        
+        np_img = img.cpu().detach().numpy()
+        np_img = np.moveaxis(np_img, [0, 1, 2], [2, 0, 1])
+        np_img = (np_img *255).astype(np.uint8)
+
+        cam_resized = cam.cpu().detach().numpy()
+        cam_resized = (cam_resized *255).astype(np.uint8)
+        cam_resized = np.array(Image.fromarray(cam_resized).resize((img.shape[2], img.shape[1]), Image.BILINEAR)) 
+
+        colored_overlay = np.zeros((40, 80, 3)).astype(np.uint8) 
+        colored_overlay[:, :, 0] = cam_resized.astype(np.uint8)  
+        colored_overlay[:, :, 1] = cam_resized.astype(np.uint8)  
+        colored_overlay[:, :, 2] = cam_resized.astype(np.uint8)  
+        
+        overlay_img = ((colored_overlay.astype(np.float32) * 0.5) + (np_img.astype(np.float32) * 0.5)).astype(np.uint8)
+        #overlay_img = cam_resized.astype(np.uint8) 
+
+        # Ensure the output directory exists
+        output_dir = 'cam_outputs_resnet'
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        if self.epochh>=0:
+            output_path = os.path.join(output_dir, f'original_image_{country}.png')
+            pil_image.save(output_path, inplace=True)
+
+        # Save the image
+        output_path = os.path.join(output_dir, f'CAM_{self.epochh}{pred_country}.png')
+
+        #colored_overlay = np.zeros((40, 80, 3)).astype(np.uint8) 
+        #colored_overlay[:, :, 0] = overlay_img.astype(np.uint8) 
+        Image.fromarray(overlay_img).save(output_path)
+
+        self.epochh+=1
+
+    
+    def generate_cam(self, feature_maps, pred_class):
+        # Get the weight of the `linear` layer for the predicted class
+        W = self.gap_mlp.weight[pred_class,:].view(self.gap_mlp.weight.shape[1], 1, 1)
+        feature_maps = torch.squeeze(feature_maps, 0)
+        cam = feature_maps*W
+        cam = cam.sum(dim=0)
+        return cam
 
 
 ######################### 2.

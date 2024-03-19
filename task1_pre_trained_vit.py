@@ -167,7 +167,7 @@ if not torch.backends.mps.is_available():
 else:
     mps_device = torch.device("mps")
 
-epochs=15
+epochs=40
 
 model = PreTrainedViT(num_classes=n_classes)
 model.to(mps_device)

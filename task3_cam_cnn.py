@@ -30,7 +30,7 @@ batch_size = 512  # Define your batch size
 
 ############################################# 1.
 class Classifier(pl.LightningModule):
-    def __init__(self, a, b, c, d, n_classes, cam):
+    def __init__(self, a, b, c, d, n_classes, cam=False):
         super().__init__()
 
         self.epochh=0
@@ -60,6 +60,12 @@ class Classifier(pl.LightningModule):
 
         self.linear = nn.Linear(c, n_classes)
 
+        #With cam
+        self.conv3 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=4, padding=1, stride=2) #2, 5 (because starting size is 40, 80)
+        self.norm3 = nn.BatchNorm2d(c)
+
+        self.gap_mlp = nn.Linear(c, n_classes)
+
         ###
 
         self.L = nn.CrossEntropyLoss()
@@ -82,11 +88,18 @@ class Classifier(pl.LightningModule):
             x = self.pool2(x)
             x = self.dropout2(x)
 
-            x = self.relu(self.norm5(self.conv5(x)))
-            x = self.dropout3(x)
+            if self.cam:
+                x = self.relu(self.norm3(self.conv3(x)))
+                print("0", x.shape)
+                x_cam = torch.mean(x, dim = (2,3))
+                x_cam = self.gap_mlp(x_cam)
 
-            x = x.view(x.shape[0], -1)
-            x = self.linear(x)
+            else:
+                x = self.relu(self.norm5(self.conv5(x)))
+                x = self.dropout3(x)
+
+                x = x.view(x.shape[0], -1)
+                x = self.linear(x)
 
         else:
 
@@ -98,17 +111,26 @@ class Classifier(pl.LightningModule):
             x = self.pool2(x)
             x = self.dropout2(x)
 
-            x = self.relu(self.conv5(x))
-            x = self.dropout3(x)
+            if self.cam:
+                x = self.relu(self.conv3(x))
+                print("1", x.shape)
+                x_cam = torch.mean(x, dim = (2,3))
+                x_cam = self.gap_mlp(x_cam)
 
-            x = x.view(x.shape[0], -1)
-            x = self.linear(x)
+            else:
+                x = self.relu(self.conv5(x))
+                x = self.dropout3(x)
 
+                x = x.view(x.shape[0], -1)
+                x = self.linear(x)
+
+        if self.cam:
+            return x, x_cam
         return x
     
     def _step(self, batch, batch_idx):
 
-        out = self(batch[0])
+        x, out = self(batch[0])
 
         return self.L(out, batch[-1])
     
@@ -140,6 +162,79 @@ class Classifier(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=0.001, weight_decay=1e-5)
         return optimizer
     
+    def on_train_epoch_start(self):
+
+        img, classe = test_dataset[0]
+        dico = test_dataset.class_to_idx
+        country = [key for key, value in dico.items() if value == classe]
+
+        pil_image = TF.to_pil_image(img)
+        
+
+        with torch.no_grad():
+            # Get predictions and CAMs for these images
+            conved_img, pred = self(img.unsqueeze(0), cam=True)
+            cam = self.generate_cam(conved_img, pred.argmax(dim=1))  # Implement generate_cam based on the steps provided
+            # Plotting code here: Display original image with CAM overlay
+
+            pred_country = [key for key, value in dico.items() if value == pred.argmax(dim=1)]
+
+        
+        np_img = img.cpu().detach().numpy()
+        np_img = np.moveaxis(np_img, [0, 1, 2], [2, 0, 1])
+        np_img = (np_img *255).astype(np.uint8)
+
+        cam_resized = cam.cpu().detach().numpy()
+        cam_resized = (cam_resized *255).astype(np.uint8)
+        cam_resized = np.array(Image.fromarray(cam_resized).resize((img.shape[2], img.shape[1]), Image.BILINEAR)) 
+
+        colored_overlay = np.zeros((40, 80, 3)).astype(np.uint8) 
+        colored_overlay[:, :, 0] = cam_resized.astype(np.uint8)  
+        colored_overlay[:, :, 1] = cam_resized.astype(np.uint8)  
+        colored_overlay[:, :, 2] = cam_resized.astype(np.uint8)  
+        
+        #print("SHAPES", type(colored_overlay), type(np_img), np.max(np_img))
+        overlay_img = ((colored_overlay.astype(np.float32) * 0.5) + (np_img.astype(np.float32) * 0.5)).astype(np.uint8)
+        #overlay_img = cam_resized.astype(np.uint8) 
+
+        # Ensure the output directory exists
+        output_dir = 'cam_outputs'
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        if self.epochh>=0:
+            output_path = os.path.join(output_dir, f'original_image_{country}.png')
+            pil_image.save(output_path, inplace=True)
+
+        # Save the image
+        output_path = os.path.join(output_dir, f'CAM_{self.epochh}{pred_country}.png')
+
+        #colored_overlay = np.zeros((40, 80, 3)).astype(np.uint8) 
+        #colored_overlay[:, :, 0] = overlay_img.astype(np.uint8) 
+        Image.fromarray(overlay_img).save(output_path)
+
+        self.epochh+=1
+
+
+        """
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(img_np)
+        plt.title("Original Image")
+        plt.subplot(1, 2, 2)
+        plt.imshow(img_np)
+        plt.imshow(cam_resized, alpha=0.5, interpolation='bilinear')  # Overlay CAM
+        plt.title(f"CAM for class {classe}")
+        plt.show()
+        """
+    
+    def generate_cam(self, feature_maps, pred_class):
+        # Get the weight of the `linear` layer for the predicted class
+        W = self.gap_mlp.weight[pred_class,:].view(self.gap_mlp.weight.shape[1], 1, 1)
+        feature_maps = torch.squeeze(feature_maps, 0)
+        cam = feature_maps*W
+        cam = cam.sum(dim=0)
+        return cam
 
 
 ######################### 2.
