@@ -9,7 +9,7 @@ import copy
 
 #1. Dataloader
 class ImageDataset_2(Dataset):
-    def __init__(self, root_dir, resizing = (40, 80)):
+    def __init__(self, root_dir, resizing = (80, 160)):
 
         # Define your transformations here, if any
 
@@ -33,6 +33,7 @@ class ImageDataset_2(Dataset):
         self.planning = {}
         self.instructions = {} #What to do for get item
         self.summary = {}
+        self.summary_before = {}
 
         # Use a set for faster lookup
         self.existing_classes = set()
@@ -116,7 +117,7 @@ class ImageDataset_2(Dataset):
                     ###################### #Adding robustness to the model:
                     #3. Add the noise
                     c = 0
-                    if np.random.random((0,1))<0.2:
+                    if np.random.random()<0.2:
                         c=1
                     else:
                         c=0
@@ -148,7 +149,7 @@ class ImageDataset_2(Dataset):
 
                     #4. Add black holes
                     d = 0
-                    if np.random.random((0,1))<0.2:
+                    if np.random.random()<0.2:
                         d=1
                     else:
                         d=0
@@ -180,9 +181,11 @@ class ImageDataset_2(Dataset):
 
                     if class_name not in self.summary:
                         self.summary[class_name]=(1+a)*(1+b)*(1+c+d)
+                        self.summary_before[class_name]=1
 
                     else:
                         self.summary[class_name]+=(1+a)*(1+b)*(1+c+d)
+                        self.summary_before[class_name]+=1
          
             
     def __len__(self):

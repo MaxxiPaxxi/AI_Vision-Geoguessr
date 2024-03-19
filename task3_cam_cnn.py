@@ -30,11 +30,10 @@ batch_size = 512  # Define your batch size
 
 ############################################# 1.
 class Classifier(pl.LightningModule):
-    def __init__(self, a, b, c, d, n_classes, cam=False):
+    def __init__(self, a, b, c, d, n_classes):
         super().__init__()
 
         self.epochh=0
-        self.cam = cam
 
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
@@ -53,18 +52,16 @@ class Classifier(pl.LightningModule):
         self.norm2 = nn.BatchNorm2d(b)
         self.pool2 = nn.MaxPool2d(2, 2) #2, 5
 
-        ###
-        #Without cam
-        self.conv5 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=(2, 5))
-        self.norm5 = nn.BatchNorm2d(c)
-
-        self.linear = nn.Linear(c, n_classes)
+        self.linear1 = nn.Linear(b, 3*b)
+        self.linear2 = nn.Linear(3*b, b)
 
         #With cam
         self.conv3 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=4, padding=1, stride=2) #2, 5 (because starting size is 40, 80)
         self.norm3 = nn.BatchNorm2d(c)
 
-        self.gap_mlp = nn.Linear(c, n_classes)
+        self.gap_mlp = nn.Linear(b, n_classes)
+
+        self.softmax = nn.Softmax(dim=1)
 
         ###
 
@@ -85,21 +82,18 @@ class Classifier(pl.LightningModule):
             x = self.dropout1(x)
 
             x = self.relu(self.norm2(self.conv2(x)))
-            x = self.pool2(x)
-            x = self.dropout2(x)
 
-            if self.cam:
-                x = self.relu(self.norm3(self.conv3(x)))
-                print("0", x.shape)
-                x_cam = torch.mean(x, dim = (2,3))
-                x_cam = self.gap_mlp(x_cam)
+            
+            #x = self.pool2(x)
+            #x = self.dropout2(x)
 
-            else:
-                x = self.relu(self.norm5(self.conv5(x)))
-                x = self.dropout3(x)
+            #x = self.relu(self.norm3(self.conv3(x)))
+            x_cam = torch.mean(x, dim = (2,3))
 
-                x = x.view(x.shape[0], -1)
-                x = self.linear(x)
+            x_cam = self.relu(self.linear1(x_cam))
+            x_cam = self.relu(self.linear2(x_cam))
+
+            x_cam = self.gap_mlp(x_cam)
 
         else:
 
@@ -108,29 +102,23 @@ class Classifier(pl.LightningModule):
             x = self.dropout1(x)
 
             x = self.relu(self.conv2(x))
-            x = self.pool2(x)
-            x = self.dropout2(x)
+            #x = self.pool2(x)
+            #x = self.dropout2(x)
 
-            if self.cam:
-                x = self.relu(self.conv3(x))
-                print("1", x.shape)
-                x_cam = torch.mean(x, dim = (2,3))
-                x_cam = self.gap_mlp(x_cam)
+            #x = self.relu(self.conv3(x))
+            x_cam = torch.mean(x, dim = (2,3))
 
-            else:
-                x = self.relu(self.conv5(x))
-                x = self.dropout3(x)
+            x_cam = self.relu(self.linear1(x_cam))
+            x_cam = self.relu(self.linear2(x_cam))
 
-                x = x.view(x.shape[0], -1)
-                x = self.linear(x)
+            x_cam = self.gap_mlp(x_cam)
 
-        if self.cam:
-            return x, x_cam
-        return x
+        return x, x_cam
+    
     
     def _step(self, batch, batch_idx):
 
-        x, out = self(batch[0])
+        _, out = self(batch[0])
 
         return self.L(out, batch[-1])
     
@@ -141,8 +129,7 @@ class Classifier(pl.LightningModule):
         loss = self._step(batch, batch_idx)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
-
-        self.train_acc(self(batch[0]),batch[-1] )
+        self.train_acc(self(batch[0])[1],batch[-1] )
         self.log('train_acc', self.train_acc, on_step=True, on_epoch=True)
         return loss
     
@@ -152,7 +139,7 @@ class Classifier(pl.LightningModule):
         val_loss = self._step(batch, batch_idx)
         self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
-        self.val_acc(self(batch[0]), batch[-1] )
+        self.val_acc(self(batch[0])[1], batch[-1] )
         self.log('val_acc', self.val_acc, on_step=True, on_epoch=True)
         return val_loss
 
@@ -164,41 +151,67 @@ class Classifier(pl.LightningModule):
     
     def on_train_epoch_start(self):
 
+        """
         img, classe = test_dataset[0]
         dico = test_dataset.class_to_idx
         country = [key for key, value in dico.items() if value == classe]
+        """
+
+        img= Image.open("/Users/mathieugierski/Nextcloud/Macbook M3/vision/AI_Vision-Geoguessr/cam_outputs_conv3/original_image_['Poland'].png").convert('RGB')
+        transform = transforms.ToTensor()
+        img = transform(img)
+        dico = test_dataset.class_to_idx
+        country = "Poland"
+        classe = test_dataset.class_to_idx[country]
 
         pil_image = TF.to_pil_image(img)
         
 
         with torch.no_grad():
             # Get predictions and CAMs for these images
-            conved_img, pred = self(img.unsqueeze(0), cam=True)
-            cam = self.generate_cam(conved_img, pred.argmax(dim=1))  # Implement generate_cam based on the steps provided
-            # Plotting code here: Display original image with CAM overlay
+            conved_img, pred = self(img.unsqueeze(0))
+            pred = self.softmax(pred)
+
+            cam = self.generate_cam(conved_img, pred.argmax(dim=1))
 
             pred_country = [key for key, value in dico.items() if value == pred.argmax(dim=1)]
+            cam_true_country = self.generate_cam(conved_img, classe)
 
         
         np_img = img.cpu().detach().numpy()
         np_img = np.moveaxis(np_img, [0, 1, 2], [2, 0, 1])
         np_img = (np_img *255).astype(np.uint8)
 
+        ###
         cam_resized = cam.cpu().detach().numpy()
         cam_resized = (cam_resized *255).astype(np.uint8)
         cam_resized = np.array(Image.fromarray(cam_resized).resize((img.shape[2], img.shape[1]), Image.BILINEAR)) 
 
-        colored_overlay = np.zeros((40, 80, 3)).astype(np.uint8) 
+        colored_overlay = np.zeros((img.shape[1], img.shape[2], 3)).astype(np.uint8) 
         colored_overlay[:, :, 0] = cam_resized.astype(np.uint8)  
         colored_overlay[:, :, 1] = cam_resized.astype(np.uint8)  
         colored_overlay[:, :, 2] = cam_resized.astype(np.uint8)  
-        
-        #print("SHAPES", type(colored_overlay), type(np_img), np.max(np_img))
+
         overlay_img = ((colored_overlay.astype(np.float32) * 0.5) + (np_img.astype(np.float32) * 0.5)).astype(np.uint8)
+
+        ###
+        cam_resized2 = cam_true_country.cpu().detach().numpy()
+        cam_resized2 = (cam_resized2 *255).astype(np.uint8)
+        cam_resized2 = np.array(Image.fromarray(cam_resized2).resize((img.shape[2], img.shape[1]), Image.BILINEAR)) 
+
+        colored_overlay2 = np.zeros((img.shape[1], img.shape[2], 3)).astype(np.uint8) 
+        colored_overlay2[:, :, 0] = cam_resized2.astype(np.uint8)  
+        colored_overlay2[:, :, 1] = cam_resized2.astype(np.uint8)  
+        colored_overlay2[:, :, 2] = cam_resized2.astype(np.uint8)  
+
+        overlay_img2 = ((colored_overlay2.astype(np.float32) * 0.5) + (np_img.astype(np.float32) * 0.5)).astype(np.uint8)
+
+        #print("SHAPES", type(colored_overlay), type(np_img), np.max(np_img))
+        
         #overlay_img = cam_resized.astype(np.uint8) 
 
         # Ensure the output directory exists
-        output_dir = 'cam_outputs'
+        output_dir = 'cam_outputs_conv2_with_2lin'
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
@@ -207,11 +220,11 @@ class Classifier(pl.LightningModule):
             pil_image.save(output_path, inplace=True)
 
         # Save the image
-        output_path = os.path.join(output_dir, f'CAM_{self.epochh}{pred_country}.png')
-
-        #colored_overlay = np.zeros((40, 80, 3)).astype(np.uint8) 
-        #colored_overlay[:, :, 0] = overlay_img.astype(np.uint8) 
+        output_path = os.path.join(output_dir, f'CAM_{self.epochh}{pred_country}{torch.max(pred)}.png')
         Image.fromarray(overlay_img).save(output_path)
+
+        output_path = os.path.join(output_dir, f'CAM_{self.epochh}{country}{pred[0, classe]}.png')
+        Image.fromarray(overlay_img2).save(output_path)
 
         self.epochh+=1
 
@@ -296,13 +309,15 @@ counts = list(class_counts.values())
 classes = list(train_dataset.summary.keys())
 counts = list(train_dataset.summary.values())
 
+print(train_dataset.summary)
+
 plt.figure(figsize=(10, 6))
 plt.bar(classes, counts, color='skyblue')
 plt.xlabel('Class')
 plt.ylabel('Number of Elements')
 plt.title('Number of Elements in Each Class')
 plt.xticks(rotation=45)
-#plt.show()
+plt.show()
 
 
 #print("Training set size:", len(train_dataset))
@@ -327,15 +342,15 @@ epochs=100
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 22, 23, 1)
-    b = trial.suggest_int("b", 40, 41, 1)
-    c = trial.suggest_int("c", 52, 53, 1)
+    a = trial.suggest_int("a", 25, 26, 1)
+    b = trial.suggest_int("b", 100, 101, 1)
+    c = trial.suggest_int("c", 62, 63, 1)
     #c = 0
     #d = trial.suggest_int("d", 10, 120, 10)
     d=0
     #e = trial.suggest_int("e", 10, 120, 10)
 
-    model = Classifier(a, b, c, d, n_classes, cam = True)
+    model = Classifier(a, b, c, d, n_classes)
     model.to(mps_device)
 
     mlf_logger = MLFlowLogger(experiment_name="lightning_logs", tracking_uri="file:./ml-runs")
