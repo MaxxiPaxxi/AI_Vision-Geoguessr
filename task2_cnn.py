@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 from task2_dataset import ImageDataset_task2
 
 import torchmetrics
+import utm
 
 import copy
 
@@ -141,6 +142,61 @@ class Location_regressor(pl.LightningModule):
         return optimizer
     
 
+    def on_train_epoch_start(self):
+
+        self.eval()  # Make sure the model is in evaluation mode
+        y_true = []
+        y_pred = []
+
+        with torch.no_grad():
+            for i in range(len(test_dataset)):
+
+                
+
+                print(i/len(test_dataset))
+                x, y = test_dataset[i]
+                print(y.shape)
+                x = x.unsqueeze(0)  # Assuming x needs to be batched
+                output = self(x).view(-1)
+                print(output.shape)
+
+
+                y_true.append(y.detach().cpu().numpy())
+                y_pred.append(output.detach().cpu().numpy())
+
+        #compute_distances(y_true, y_pred)
+        print("MEAN DISTANCEEE", compute_distances(y_true, y_pred))
+        self.log("avg_error_dist", compute_distances(y_true, y_pred), on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
+
+
+def compute_distances(y_true, y_pred):
+
+    # Ensure y_true and y_pred are numpy arrays
+    y_true = np.array(y_true)*test_dataset.stds+test_dataset.means
+    y_pred = np.array(y_pred)*test_dataset.stds+test_dataset.means
+
+    utm_coords = []
+    for lat, lon in y_true:
+        utm_coords.append((lat*3.1415/180, lon*3.1415/180))
+
+    y_true = np.array(utm_coords)
+
+    utm_coords = []
+    for lat, lon in y_pred:
+
+        utm_coords.append((lat*3.1415/180, lon*3.1415/180))
+
+    y_pred = np.array(utm_coords)
+
+
+    print(y_true.shape)
+    
+    # Calculate the differences in longitude and latitude
+    diff = np.sqrt((y_pred[:,0] - y_true[:,0])**2+(y_pred[:,1] - y_true[:,1])**2)
+    
+    return np.sum(diff)
+    
 
 ######################### 2.
 def get_files_from_directory(directory):
@@ -255,7 +311,7 @@ def objective(trial: optuna.trial.Trial) -> float:
 pruner = optuna.pruners.MedianPruner()
 
 study = optuna.create_study(direction="maximize", pruner=pruner)
-study.optimize(objective, n_trials=30)
+study.optimize(objective, n_trials=1)
 
 print(f"Number of finished trials: {len(study.trials)}")
 

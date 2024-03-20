@@ -52,8 +52,10 @@ class Classifier(pl.LightningModule):
         self.norm2 = nn.BatchNorm2d(b)
         self.pool2 = nn.MaxPool2d(2, 2) #2, 5
 
-        self.linear1 = nn.Linear(b, 3*b)
-        self.linear2 = nn.Linear(3*b, b)
+        self.linear1 = nn.Linear(b, 2*b)
+        self.norm11 = nn.BatchNorm1d(2*b)
+        self.linear2 = nn.Linear(2*b, b)
+        self.norm22 = nn.BatchNorm1d(b)
 
         #With cam
         self.conv3 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=4, padding=1, stride=2) #2, 5 (because starting size is 40, 80)
@@ -90,8 +92,8 @@ class Classifier(pl.LightningModule):
             #x = self.relu(self.norm3(self.conv3(x)))
             x_cam = torch.mean(x, dim = (2,3))
 
-            x_cam = self.relu(self.linear1(x_cam))
-            x_cam = self.relu(self.linear2(x_cam))
+            #x_cam = self.relu(self.norm11(self.linear1(x_cam)))
+            #x_cam = self.relu(self.norm22(self.linear2(x_cam)))
 
             x_cam = self.gap_mlp(x_cam)
 
@@ -108,8 +110,8 @@ class Classifier(pl.LightningModule):
             #x = self.relu(self.conv3(x))
             x_cam = torch.mean(x, dim = (2,3))
 
-            x_cam = self.relu(self.linear1(x_cam))
-            x_cam = self.relu(self.linear2(x_cam))
+            #x_cam = self.relu(self.linear1(x_cam))
+            #x_cam = self.relu(self.linear2(x_cam))
 
             x_cam = self.gap_mlp(x_cam)
 
@@ -157,9 +159,10 @@ class Classifier(pl.LightningModule):
         country = [key for key, value in dico.items() if value == classe]
         """
 
-        img= Image.open("/Users/mathieugierski/Nextcloud/Macbook M3/vision/AI_Vision-Geoguessr/cam_outputs_conv3/original_image_['Poland'].png").convert('RGB')
-        transform = transforms.ToTensor()
-        img = transform(img)
+        #img= Image.open("/Users/mathieugierski/Nextcloud/Macbook M3/vision/AI_Vision-Geoguessr/cam_outputs_conv3/original_image_['Poland'].png").convert('RGB')
+        img, _ = test_dataset[0]
+        #transform = transforms.ToTensor()
+        #img = transform(img)
         dico = test_dataset.class_to_idx
         country = "Poland"
         classe = test_dataset.class_to_idx[country]
@@ -211,7 +214,7 @@ class Classifier(pl.LightningModule):
         #overlay_img = cam_resized.astype(np.uint8) 
 
         # Ensure the output directory exists
-        output_dir = 'cam_outputs_conv2_with_2lin'
+        output_dir = 'cam_outputs_conv2'
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
@@ -246,9 +249,12 @@ class Classifier(pl.LightningModule):
         W = self.gap_mlp.weight[pred_class,:].view(self.gap_mlp.weight.shape[1], 1, 1)
         feature_maps = torch.squeeze(feature_maps, 0)
         cam = feature_maps*W
+        #adding relu
+        cam = self.relu(cam)
         cam = cam.sum(dim=0)
-        return cam
 
+        print("MAX", torch.max(cam))
+        return cam
 
 ######################### 2.
 def get_files_from_directory(directory):
@@ -276,7 +282,7 @@ def split_files_by_class(root_dir):
             total+=1
 
             # Perform the split
-            class_train, class_test = train_test_split(files, test_size=0.3)
+            class_train, class_test = train_test_split(files, test_size=0.3, random_state=2)
             
             train_files.extend(class_train)
             test_files.extend(class_test)
@@ -317,7 +323,7 @@ plt.xlabel('Class')
 plt.ylabel('Number of Elements')
 plt.title('Number of Elements in Each Class')
 plt.xticks(rotation=45)
-plt.show()
+#plt.show()
 
 
 #print("Training set size:", len(train_dataset))

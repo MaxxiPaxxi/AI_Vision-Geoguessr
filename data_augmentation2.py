@@ -9,7 +9,7 @@ import copy
 
 #1. Dataloader
 class ImageDataset_2(Dataset):
-    def __init__(self, root_dir, resizing = (80, 160)):
+    def __init__(self, root_dir, resizing = (40, 80)):
 
         # Define your transformations here, if any
 

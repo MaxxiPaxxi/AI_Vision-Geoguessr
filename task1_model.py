@@ -140,6 +140,70 @@ class Classifier(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=0.001, weight_decay=1e-5)
         return optimizer
     
+    def on_train_epoch_start(self):
+
+
+        if self.epochh==0:
+            self.eval()  # Make sure the model is in evaluation mode
+            y_true = []
+            y_pred = []
+
+            with torch.no_grad():
+                for i in range(len(test_dataset)):
+
+                    print(i/len(test_dataset))
+                    x, y = test_dataset[i]
+                    x = x.unsqueeze(0)  # Assuming x needs to be batched
+                    output = self(x)  # Get model output
+                    _, predicted = torch.max(output, 1)  # Convert output to predicted class index
+                    y_true.append(y)
+                    y_pred.append(predicted.item())
+
+            plot_mispredictions(np.array(y_true), np.array(y_pred))
+            self.epochh+=1
+
+        else:
+            self.epochh+=1
+    
+
+def plot_mispredictions(y_true, y_pred):
+    # Invert the class dictionary to map indices to class names
+    index_to_class = {v: k for k, v in test_dataset.class_to_idx.items()}
+    
+    num_classes = len(test_dataset.class_to_idx)
+    # Initialize confusion matrix
+    confusion_matrix = np.zeros((num_classes, num_classes))
+
+    # Populate confusion matrix
+    for true, pred in zip(y_true, y_pred):
+        confusion_matrix[true, pred] += 1
+
+    # Plotting
+    fig, axs = plt.subplots(1, 2, figsize=(20, 8))
+    class_names = [index_to_class[i] for i in range(num_classes)]  # Sorted class names by index
+
+    for i in range(num_classes):
+        # Mispredicted as other classes
+        mispred_as_others = np.sum(confusion_matrix[i, :]) - confusion_matrix[i, i]
+        # Mispredicted from other classes
+        mispred_from_others = np.sum(confusion_matrix[:, i]) - confusion_matrix[i, i]
+
+        axs[0].bar(class_names[i], mispred_as_others, color='skyblue')
+        axs[1].bar(class_names[i], mispred_from_others, color='lightgreen')
+
+    axs[0].set_title('Number of times each class was misclassified as another class')
+    axs[1].set_title('Number of times other classes were misclassified as this class')
+    for ax in axs:
+        ax.set_ylabel('Number of Mispredictions')
+        ax.set_xlabel('Class')
+        ax.set_xticklabels(class_names, rotation=45)
+
+    plt.tight_layout()
+    plt.show()
+
+# After collecting y_true and y_pred
+# plot_mispredictions(y_true, y_pred, class_names)
+
 
 
 ######################### 2.
