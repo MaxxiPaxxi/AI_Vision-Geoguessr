@@ -61,7 +61,7 @@ class Classifier(pl.LightningModule):
         self.conv3 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=4, padding=1, stride=2) #2, 5 (because starting size is 40, 80)
         self.norm3 = nn.BatchNorm2d(c)
 
-        self.gap_mlp = nn.Linear(b, n_classes)
+        self.gap_mlp = nn.Linear(c, n_classes)
 
         self.softmax = nn.Softmax(dim=1)
 
@@ -86,10 +86,10 @@ class Classifier(pl.LightningModule):
             x = self.relu(self.norm2(self.conv2(x)))
 
             
-            #x = self.pool2(x)
-            #x = self.dropout2(x)
+            x = self.pool2(x)
+            x = self.dropout2(x)
 
-            #x = self.relu(self.norm3(self.conv3(x)))
+            x = self.relu(self.norm3(self.conv3(x)))
             x_cam = torch.mean(x, dim = (2,3))
 
             #x_cam = self.relu(self.norm11(self.linear1(x_cam)))
@@ -104,10 +104,10 @@ class Classifier(pl.LightningModule):
             x = self.dropout1(x)
 
             x = self.relu(self.conv2(x))
-            #x = self.pool2(x)
-            #x = self.dropout2(x)
+            x = self.pool2(x)
+            x = self.dropout2(x)
 
-            #x = self.relu(self.conv3(x))
+            x = self.relu(self.conv3(x))
             x_cam = torch.mean(x, dim = (2,3))
 
             #x_cam = self.relu(self.linear1(x_cam))
@@ -159,10 +159,10 @@ class Classifier(pl.LightningModule):
         country = [key for key, value in dico.items() if value == classe]
         """
 
-        #img= Image.open("/Users/mathieugierski/Nextcloud/Macbook M3/vision/AI_Vision-Geoguessr/cam_outputs_conv3/original_image_['Poland'].png").convert('RGB')
-        img, _ = test_dataset[0]
-        #transform = transforms.ToTensor()
-        #img = transform(img)
+        img= Image.open("/Users/mathieugierski/Nextcloud/Macbook M3/vision/AI_Vision-Geoguessr/original_image_Poland.png").convert('RGB')
+        #img, _ = test_dataset[0]
+        transform = transforms.ToTensor()
+        img = transform(img)
         dico = test_dataset.class_to_idx
         country = "Poland"
         classe = test_dataset.class_to_idx[country]
@@ -190,31 +190,29 @@ class Classifier(pl.LightningModule):
         cam_resized = (cam_resized *255).astype(np.uint8)
         cam_resized = np.array(Image.fromarray(cam_resized).resize((img.shape[2], img.shape[1]), Image.BILINEAR)) 
 
-        colored_overlay = np.zeros((img.shape[1], img.shape[2], 3)).astype(np.uint8) 
-        colored_overlay[:, :, 0] = cam_resized.astype(np.uint8)  
-        colored_overlay[:, :, 1] = cam_resized.astype(np.uint8)  
-        colored_overlay[:, :, 2] = cam_resized.astype(np.uint8)  
+        overlay_img = overlay_attention_mask(np_img, cam_resized)
+        #plt.imshow(overlay_img)
+        #plt.axis('off')  # Hide axes ticks
+        #plt.show()
 
-        overlay_img = ((colored_overlay.astype(np.float32) * 0.5) + (np_img.astype(np.float32) * 0.5)).astype(np.uint8)
+        overlay_img = np.array(overlay_img)
+
+        #overlay_img = ((colored_overlay.astype(np.float32) * 0.5) + (np_img.astype(np.float32) * 0.5)).astype(np.uint8)
 
         ###
         cam_resized2 = cam_true_country.cpu().detach().numpy()
         cam_resized2 = (cam_resized2 *255).astype(np.uint8)
         cam_resized2 = np.array(Image.fromarray(cam_resized2).resize((img.shape[2], img.shape[1]), Image.BILINEAR)) 
 
-        colored_overlay2 = np.zeros((img.shape[1], img.shape[2], 3)).astype(np.uint8) 
-        colored_overlay2[:, :, 0] = cam_resized2.astype(np.uint8)  
-        colored_overlay2[:, :, 1] = cam_resized2.astype(np.uint8)  
-        colored_overlay2[:, :, 2] = cam_resized2.astype(np.uint8)  
-
-        overlay_img2 = ((colored_overlay2.astype(np.float32) * 0.5) + (np_img.astype(np.float32) * 0.5)).astype(np.uint8)
+        overlay_img2 = overlay_attention_mask(np_img, cam_resized2)
+        overlay_img2 = np.array(overlay_img2)
 
         #print("SHAPES", type(colored_overlay), type(np_img), np.max(np_img))
         
         #overlay_img = cam_resized.astype(np.uint8) 
 
         # Ensure the output directory exists
-        output_dir = 'cam_outputs_conv2'
+        output_dir = 'cam_outputs_conv3'
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
@@ -231,18 +229,6 @@ class Classifier(pl.LightningModule):
 
         self.epochh+=1
 
-
-        """
-        plt.figure(figsize=(10, 5))
-        plt.subplot(1, 2, 1)
-        plt.imshow(img_np)
-        plt.title("Original Image")
-        plt.subplot(1, 2, 2)
-        plt.imshow(img_np)
-        plt.imshow(cam_resized, alpha=0.5, interpolation='bilinear')  # Overlay CAM
-        plt.title(f"CAM for class {classe}")
-        plt.show()
-        """
     
     def generate_cam(self, feature_maps, pred_class):
         # Get the weight of the `linear` layer for the predicted class
@@ -255,6 +241,22 @@ class Classifier(pl.LightningModule):
 
         print("MAX", torch.max(cam))
         return cam
+    
+def overlay_attention_mask(image, attention_mask):
+
+    # Ensure the attention mask is in the range [0, 1]
+    attention_mask_normalized = attention_mask / 255.0
+
+    # Create a colormap (from blue to red)
+    colormap = plt.get_cmap('bwr')
+    
+    # Apply the colormap to the attention mask
+    attention_colored = colormap(attention_mask_normalized)[:, :, :3]  # Drop alpha channel
+    
+    # Blend the attention overlay with the original image
+    overlayed_image = (0.5 * image + 0.5 * attention_colored * 255).astype(np.uint8)
+    
+    return Image.fromarray(overlayed_image)
 
 ######################### 2.
 def get_files_from_directory(directory):
@@ -317,13 +319,6 @@ counts = list(train_dataset.summary.values())
 
 print(train_dataset.summary)
 
-plt.figure(figsize=(10, 6))
-plt.bar(classes, counts, color='skyblue')
-plt.xlabel('Class')
-plt.ylabel('Number of Elements')
-plt.title('Number of Elements in Each Class')
-plt.xticks(rotation=45)
-#plt.show()
 
 
 #print("Training set size:", len(train_dataset))

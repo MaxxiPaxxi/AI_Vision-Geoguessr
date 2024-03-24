@@ -10,12 +10,16 @@ import os
 import pickle 
 from sklearn.model_selection import train_test_split
 import torch
+from sklearn.cluster import KMeans
 
 #1. Dataloader
 class ImageDataset_task2(Dataset):
-    def __init__(self, root_dir, resizing = (80, 160)):
+    def __init__(self, root_dir, resizing = (80, 160), clustering = False, k = 5):
 
         # Define your transformations here, if any
+
+        self.clustering= clustering
+        self.k = k
 
         if resizing is None:
             self.transform = transforms.Compose([transforms.ToTensor()], )
@@ -45,6 +49,7 @@ class ImageDataset_task2(Dataset):
                 corresp_dict_rev[iterator]=(int(k), int(i))
                 iterator+=1
 
+
         self.corresp_dict_rev = corresp_dict_rev
        
         self.root_dir = root_dir
@@ -67,18 +72,28 @@ class ImageDataset_task2(Dataset):
 
         # Assume root_dir is a directory. Adjust if root_dir is actually a list of files.
 
+        #print("CORRESP", corresp)
+
+        if self.clustering:
+            clustered_corresp = apply_kmeans_clustering(corresp, k = self.k)
+            print("CORRESP", clustered_corresp)
+
+
         idx = 0
         for file in root_dir:
             if file.lower().endswith(('.png', '.jpg', '.jpeg')):
 
                 #self.images.append(file)
                 class_name = file.split("/")[-1]
-                print("class name", class_name)
+                #print("class name", class_name)
                 class_name = class_name.split('.')[0]
                 classe = (int(class_name.split('_')[-2]), int(class_name.split('_')[-1]))
-                print(classe)
+                #print(classe)
 
-                self.instructions[idx] = (file, corresp[corresp_dict[classe]][0], corresp[corresp_dict[classe]][1])
+                if self.clustering:
+                    self.instructions[idx] = (file, clustered_corresp[corresp_dict[classe]][0])
+                else:
+                    self.instructions[idx] = (file, corresp[corresp_dict[classe]][0], corresp[corresp_dict[classe]][1])
                 idx+=1
   
     def __len__(self):
@@ -89,12 +104,18 @@ class ImageDataset_task2(Dataset):
 
         instruction = self.instructions[idx]
         file = instruction[0]
-        lon = instruction[1]
-        lat = instruction[2]
 
         image = Image.open(file).convert('RGB')
-            
-        return self.transform(image), torch.Tensor([lon, lat])
+
+        if self.clustering:
+            cluster = instruction[1]
+            return self.transform(image), cluster
+
+        else:
+            lon = instruction[1]
+            lat = instruction[2]
+            return self.transform(image), torch.Tensor([lon, lat])
+
 
 
 def get_files_from_directory(directory):
@@ -132,13 +153,6 @@ def split_files_by_class(root_dir):
     
     return train_files, test_files, total
 
-#dir = '/Users/mathieugierski/Nextcloud/Macbook M3/vision/data_treated_task2'
-#train_files, test_files, n_classes = split_files_by_class(dir)
-
-# Assuming you modify ImageDataset to accept a list of files:
-#train_dataset = ImageDataset_task2(train_files)
-
-
 def normalize_array(arr):
 
     # Compute the mean and standard deviation for each column (feature)
@@ -149,3 +163,17 @@ def normalize_array(arr):
     normalized_arr = (arr - means) / stds
     
     return normalized_arr, means, stds
+
+def apply_kmeans_clustering(data, k=5):
+
+    kmeans = KMeans(n_clusters=k, random_state=0)
+    clusters = kmeans.fit_predict(data)
+    
+    return clusters.reshape(-1, 1)
+
+
+#dir = '/Users/mathieugierski/Nextcloud/Macbook M3/vision/data_treated_task2'
+#train_files, test_files, n_classes = split_files_by_class(dir)
+
+# Assuming you modify ImageDataset to accept a list of files:
+#train_dataset = ImageDataset_task2(train_files, clustering=True)
