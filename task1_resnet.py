@@ -21,6 +21,8 @@ import matplotlib.pyplot as plt
 
 from data_augmentation import ImageDataset
 
+import torchmetrics
+
 batch_size = 512  # Define your batch size
 
 ######################### 1. 
@@ -32,6 +34,9 @@ class ResNetLightning(pl.LightningModule):
         num_ftrs = self.model.fc.in_features
         self.model.fc = nn.Linear(num_ftrs, num_classes)
 
+        self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
+        self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
+
     def forward(self, x):
         # Forward pass
         return self.model(x)
@@ -42,6 +47,9 @@ class ResNetLightning(pl.LightningModule):
         logits = self.forward(x)
         loss = F.cross_entropy(logits, y)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+        self.train_acc(self(batch[0]),batch[-1] )
+        self.log('train_acc', self.train_acc, on_step=True, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -50,6 +58,9 @@ class ResNetLightning(pl.LightningModule):
         logits = self.forward(x)
         val_loss = F.cross_entropy(logits, y)
         self.log('val_loss', val_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+
+        self.val_acc(self(batch[0]), batch[-1] )
+        self.log('val_acc', self.val_acc, on_step=True, on_epoch=True)
         return val_loss
 
     def configure_optimizers(self):
