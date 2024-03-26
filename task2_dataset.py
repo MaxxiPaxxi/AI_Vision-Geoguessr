@@ -91,9 +91,10 @@ class ImageDataset_task2(Dataset):
                 #print(classe)
 
                 if self.clustering:
-                    self.instructions[idx] = (file, clustered_corresp[corresp_dict[classe]][0])
+                    C = clustered_corresp[corresp_dict[classe]][0]
                 else:
-                    self.instructions[idx] = (file, corresp[corresp_dict[classe]][0], corresp[corresp_dict[classe]][1])
+                    C = None
+                self.instructions[idx] = (file, corresp[corresp_dict[classe]][0], corresp[corresp_dict[classe]][1], C)
                 idx+=1
   
     def __len__(self):
@@ -108,8 +109,10 @@ class ImageDataset_task2(Dataset):
         image = Image.open(file).convert('RGB')
 
         if self.clustering:
-            cluster = instruction[1]
-            return self.transform(image), cluster
+            lon = instruction[1]
+            lat = instruction[2]
+            cluster = instruction[3]
+            return self.transform(image), torch.Tensor([lon, lat]), cluster
 
         else:
             lon = instruction[1]

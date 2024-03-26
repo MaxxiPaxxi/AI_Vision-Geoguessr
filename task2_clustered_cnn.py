@@ -35,6 +35,7 @@ class Location_regressor(pl.LightningModule):
         super().__init__()
 
         self.epochh=0
+        self.n_classes = n_classes
 
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
@@ -111,7 +112,7 @@ class Location_regressor(pl.LightningModule):
         out = self(batch[0])
 
         #print("BATCHY BATCH",  batch[0].shape, out.shape, batch[-1].shape)
-        target = batch[-1].to(torch.int64)
+        target = batch[2].to(torch.int64)
 
         return self.L(out, target)
     
@@ -144,7 +145,82 @@ class Location_regressor(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=0.001, weight_decay=1e-5)
         return optimizer
     
+    def on_train_epoch_start(self):
+
+        self.eval() 
+        bary = compute_barycenters(test_dataset, self.n_classes)
+        y_true = []
+        y_pred = []
+
+        with torch.no_grad():
+            for i in range(len(test_dataset)):
+
+                print(i/len(test_dataset))
+                x, y, _ = test_dataset[i] #Don't need the cluster when computing the distances
+                #print(y.shape)
+                x = x.unsqueeze(0)  # Assuming x needs to be batched
+                output = self(x).view(-1)
+                #print(output.shape)
+
+                y_true.append(y.detach().cpu().numpy())
+                y_pred.append(bary[int(torch.argmax(output))].detach().cpu().numpy())
+
+        #compute_distances(y_true, y_pred)
+        print("MEAN DISTANCEEE", compute_distances(y_true, y_pred))
+        self.log("avg_error_dist", compute_distances(y_true, y_pred), on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
     
+def compute_barycenters(dataset, k):
+    # Assuming your dataset has a method to return all items in a cluster
+    # and that there's a known list of clusters
+    barycenters = {}
+
+    for classe in range(k):
+
+        elements = None
+
+        for i in range(len(dataset)):
+
+            #print("HOLAAAA", dataset[i][1].shape)
+            
+            if dataset[i][2]==classe:
+                if elements is None:
+                    elements = dataset[i][1].view(1, -1)
+                else:
+                    elements = torch.cat((elements, dataset[i][1].view(1, -1)), axis=0)
+
+        barycenters[classe] = torch.mean(elements, axis=0)
+    
+    #print(barycenters)
+    return barycenters
+
+def compute_distances(y_true, y_pred):
+
+    # Ensure y_true and y_pred are numpy arrays
+    y_true = np.array(y_true)*test_dataset.stds+test_dataset.means
+    y_pred = np.array(y_pred)*test_dataset.stds+test_dataset.means
+
+    utm_coords = []
+    for lat, lon in y_true:
+        utm_coords.append((lat*3.1415/180, lon*3.1415/180))
+
+    y_true = np.array(utm_coords)
+
+    utm_coords = []
+    for lat, lon in y_pred:
+
+        utm_coords.append((lat*3.1415/180, lon*3.1415/180))
+
+    y_pred = np.array(utm_coords)
+
+
+    print(y_true.shape)
+    
+    # Calculate the differences in longitude and latitude
+    diff = np.sqrt((y_pred[:,0] - y_true[:,0])**2+(y_pred[:,1] - y_true[:,1])**2)
+    
+    return np.sum(diff)
+
 
 ######################### 2.
 def get_files_from_directory(directory):

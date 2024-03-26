@@ -111,7 +111,7 @@ class Location_regressor(pl.LightningModule):
 
         out = self(batch[0])
 
-        return self.L(out, batch[-1])
+        return self.L(out, batch[1])
     
 
     def training_step(self,batch, batch_idx):

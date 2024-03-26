@@ -40,7 +40,7 @@ class ResNetLightning(pl.LightningModule):
     def __init__(self, num_classes):
         super(ResNetLightning, self).__init__()
 
-        self.epochh = 0
+        self.epochh = -1
         # Initialize ResNet18
 
         self.relu = nn.ReLU()
@@ -69,7 +69,11 @@ class ResNetLightning(pl.LightningModule):
     def forward(self, x, cam=False):
         # Forward pass
             
-            with torch.no_grad():
+            if self.epochh>=5:
+                with torch.no_grad():
+                    x = self.model(x).last_hidden_state
+
+            else:
                 x = self.model(x).last_hidden_state
 
             #print(x.shape)
@@ -109,6 +113,9 @@ class ResNetLightning(pl.LightningModule):
         # Define and return optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
         return optimizer
+    
+    def on_train_epoch_start(self):
+        self.epochh+=1
     
     
 
