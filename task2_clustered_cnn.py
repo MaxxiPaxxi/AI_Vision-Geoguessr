@@ -203,7 +203,7 @@ else:
 
 epochs=40
 
-k = 2
+k = 3
 train_dataset = ImageDataset_task2(train_files, clustering=True, k=k)
 test_dataset = ImageDataset_task2(test_files, clustering=True, k=k) 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -211,9 +211,9 @@ test_loader= DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 40, 120, 20)
-    b = trial.suggest_int("b", 40, 120, 20)
-    c = trial.suggest_int("c", 40, 120, 20)
+    a = trial.suggest_int("a", 60, 61, 1)
+    b = trial.suggest_int("b", 80, 81, 1)
+    c = trial.suggest_int("c", 100, 101, 1)
     #c = 0
     #d = trial.suggest_int("d", 10, 120, 10)
     #e = trial.suggest_int("e", 10, 120, 10)
@@ -232,7 +232,7 @@ def objective(trial: optuna.trial.Trial) -> float:
 pruner = optuna.pruners.MedianPruner()
 
 study = optuna.create_study(direction="maximize", pruner=pruner)
-study.optimize(objective, n_trials=20)
+study.optimize(objective, n_trials=1)
 
 print(f"Number of finished trials: {len(study.trials)}")
 
