@@ -3,6 +3,8 @@ from PIL import Image
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader, Dataset, random_split
+from torchvision.models import resnet18
+
 
 import torch
 import torch.nn as nn
@@ -37,33 +39,25 @@ class Classifier(pl.LightningModule):
 
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
-
-        self.dropout1 = nn.Dropout(0.3)
-        self.dropout2 = nn.Dropout(0.3)
-        self.dropout3 = nn.Dropout(0.3)
-
-        #Starting with:
-        #40, 80
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=a, kernel_size=4, padding=1, stride=2)#20, 40
-        self.norm1 = nn.BatchNorm2d(a)
-        self.pool1 = nn.MaxPool2d(2, 2) #10, 20
-
-        self.conv2 = nn.Conv2d(in_channels=a, out_channels=b, kernel_size=4, padding=1, stride=2) #5, 10
-        self.norm2 = nn.BatchNorm2d(b)
-        self.pool2 = nn.MaxPool2d(1, 2) #2, 5
-
-        self.linear1 = nn.Linear(b, 2*b)
-        self.norm11 = nn.BatchNorm1d(2*b)
-        self.linear2 = nn.Linear(2*b, b)
-        self.norm22 = nn.BatchNorm1d(b)
-
-        #With cam
-        self.conv3 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=3, padding=1, stride=2) #2, 5 (because starting size is 40, 80)
-        self.norm3 = nn.BatchNorm2d(c)
-
-        self.gap_mlp = nn.Linear(c, n_classes)
-
         self.softmax = nn.Softmax(dim=1)
+
+        self.epochh = 0
+        # Initialize ResNet18
+        self.model = resnet18()
+        num_ftrs = self.model.fc.in_features
+        self.model.fc = nn.Linear(num_ftrs, n_classes)
+
+        #print("state_dict", self.model.state_dict())
+        dropout_p=0.4
+        self.model.layer1 = nn.Sequential(self.model.layer1, nn.Dropout(dropout_p))
+        self.model.layer2 = nn.Sequential(self.model.layer2, nn.Dropout(dropout_p))
+        self.model.layer3 = nn.Sequential(self.model.layer3, nn.Dropout(dropout_p))
+        self.model.layer4 = nn.Sequential(self.model.layer4, nn.Dropout(dropout_p))
+
+        self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
+        self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
+
+        self.gap_mlp = nn.Linear(256, n_classes)
 
         ###
 
@@ -73,60 +67,37 @@ class Classifier(pl.LightningModule):
         self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
 
 
-    def forward(self, x, drop=True):
+    def forward(self, x):
 
         x = x.to(mps_device)
 
         if x.shape[0]>1:
 
-            #print(x.shape)
-        
-            x = self.relu(self.norm1(self.conv1(x)))
-            #print(x.shape)
-            x = self.pool1(x)
-            #print(x.shape)
-
-            if drop:
-                x = self.dropout1(x)
-
-            x = self.relu(self.norm2(self.conv2(x)))
-            #print(x.shape)
-
-            #x = self.pool2(x)
-
-            if drop:
-                x = self.dropout2(x)
-            #print(x.shape)
-
-            x = self.relu(self.norm3(self.conv3(x)))
-            #print("XX", x.shape)
-            #print(x.shape)
-            #print("done")
-            x_cam = torch.mean(x, dim = (2,3))
-
+            x = x.to(mps_device)
+            x = self.model.conv1(x)
+            x = self.model.bn1(x)
+            x = self.model.relu(x)
+            x = self.model.maxpool(x)
+            x = self.model.layer1(x)
+            x = self.model.layer2(x)
+            x = self.model.layer3(x)
+            print("XX", x.shape)
+            x_cam = torch.mean(x , dim = (2,3))
             x_cam = self.gap_mlp(x_cam)
 
         else:
 
-            x = self.relu(self.conv1(x))
-            x = self.pool1(x)
+            x = x.to(mps_device)
+            x = self.model.conv1(x)
+            #x = self.model.bn1(x)
+            x = self.model.relu(x)
+            x = self.model.maxpool(x)
+            x = self.model.layer1(x)
+            x = self.model.layer2(x)
+            x = self.model.layer3(x)
 
-            if drop:
-                x = self.dropout1(x)
-
-            x = self.relu(self.conv2(x))
-            #x = self.pool2(x)
-
-            if drop:
-                x = self.dropout2(x)
-
-            x = self.relu(self.conv3(x))
-            #print("XX", x.shape)
-            x_cam = torch.mean(x, dim = (2,3))
-
-            #x_cam = self.relu(self.linear1(x_cam))
-            #x_cam = self.relu(self.linear2(x_cam))
-
+            print("XX", x.shape)
+            x_cam = torch.mean(x , dim = (2,3))
             x_cam = self.gap_mlp(x_cam)
 
         return x, x_cam
@@ -186,7 +157,7 @@ class Classifier(pl.LightningModule):
 
         with torch.no_grad():
             # Get predictions and CAMs for these images
-            conved_img, pred = self(img.unsqueeze(0),drop=False)
+            conved_img, pred = self(img.unsqueeze(0))
             pred = self.softmax(pred)
 
             cam = self.generate_cam(conved_img, pred.argmax(dim=1))
@@ -226,7 +197,7 @@ class Classifier(pl.LightningModule):
         #overlay_img = cam_resized.astype(np.uint8) 
 
         # Ensure the output directory exists
-        output_dir = 'cam_outputs_conv3'
+        output_dir = 'cam_outputs_resnet'
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
@@ -246,14 +217,18 @@ class Classifier(pl.LightningModule):
     
     def generate_cam(self, feature_maps, pred_class):
         # Get the weight of the `linear` layer for the predicted class
+        #print("WW", self.gap_mlp.weight.shape, self.gap_mlp.weight[pred_class,:].shape)
         W = self.gap_mlp.weight[pred_class,:].view(self.gap_mlp.weight.shape[1], 1, 1)
         feature_maps = torch.squeeze(feature_maps, 0)
+
+        #print(W.shape, feature_maps.shape)
         cam = feature_maps*W
+        #print(cam.shape)
         #adding relu
         cam = self.relu(cam)
         cam = cam.sum(dim=0)
 
-        print("MAX", torch.max(cam))
+        #print("MAX", torch.max(cam))
         return cam
     
 def overlay_attention_mask(image, attention_mask):

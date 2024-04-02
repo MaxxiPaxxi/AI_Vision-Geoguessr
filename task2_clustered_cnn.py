@@ -155,7 +155,7 @@ class Location_regressor(pl.LightningModule):
         with torch.no_grad():
             for i in range(len(test_dataset)):
 
-                print(i/len(test_dataset))
+                #print(i/len(test_dataset))
                 x, y, _ = test_dataset[i] #Don't need the cluster when computing the distances
                 #print(y.shape)
                 x = x.unsqueeze(0)  # Assuming x needs to be batched
@@ -166,7 +166,7 @@ class Location_regressor(pl.LightningModule):
                 y_pred.append(bary[int(torch.argmax(output))].detach().cpu().numpy())
 
         #compute_distances(y_true, y_pred)
-        print("MEAN DISTANCEEE", compute_distances(y_true, y_pred))
+        #print("MEAN DISTANCEEE", compute_distances(y_true, y_pred))
         self.log("avg_error_dist", compute_distances(y_true, y_pred), on_step=False, on_epoch=True, prog_bar=True, logger=True)
 
     
@@ -188,9 +188,13 @@ def compute_barycenters(dataset, k):
                     elements = dataset[i][1].view(1, -1)
                 else:
                     elements = torch.cat((elements, dataset[i][1].view(1, -1)), axis=0)
+                    
+        if elements is None:
+            elements = torch.zeros((1,2))
 
+        elements *= 3.1415/180
         barycenters[classe] = torch.mean(elements, axis=0)
-    
+
     #print(barycenters)
     return barycenters
 
@@ -214,7 +218,7 @@ def compute_distances(y_true, y_pred):
     y_pred = np.array(utm_coords)
 
 
-    print(y_true.shape)
+    #print(y_true.shape)
     
     # Calculate the differences in longitude and latitude
     diff = np.sqrt((y_pred[:,0] - y_true[:,0])**2+(y_pred[:,1] - y_true[:,1])**2)
@@ -253,7 +257,7 @@ def split_files_by_class(root_dir):
             train_files.extend(class_train)
             test_files.extend(class_test)
 
-    print("total", total)
+    #print("total", total)
     
     return train_files, test_files, total
 
@@ -277,19 +281,20 @@ else:
 
 
 
-epochs=40
+epochs=200
 
-k = 3
+k = 12
 train_dataset = ImageDataset_task2(train_files, clustering=True, k=k)
-test_dataset = ImageDataset_task2(test_files, clustering=True, k=k) 
+training_kmeans = train_dataset.kmeans_model
+test_dataset = ImageDataset_task2(test_files, clustering=True, k=k, kmeans_model = training_kmeans) 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader= DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 60, 61, 1)
-    b = trial.suggest_int("b", 80, 81, 1)
-    c = trial.suggest_int("c", 100, 101, 1)
+    a = trial.suggest_int("a", 20, 21, 1)
+    b = trial.suggest_int("b", 40, 41, 1)
+    c = trial.suggest_int("c", 50, 51, 1)
     #c = 0
     #d = trial.suggest_int("d", 10, 120, 10)
     #e = trial.suggest_int("e", 10, 120, 10)

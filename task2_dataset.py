@@ -14,12 +14,13 @@ from sklearn.cluster import KMeans
 
 #1. Dataloader
 class ImageDataset_task2(Dataset):
-    def __init__(self, root_dir, resizing = (80, 160), clustering = False, k = 5):
+    def __init__(self, root_dir, resizing = (80, 160), clustering = False, k=None, kmeans_model=None):
 
         # Define your transformations here, if any
 
         self.clustering= clustering
         self.k = k
+
 
         if resizing is None:
             self.transform = transforms.Compose([transforms.ToTensor()], )
@@ -72,11 +73,21 @@ class ImageDataset_task2(Dataset):
 
         # Assume root_dir is a directory. Adjust if root_dir is actually a list of files.
 
-        #print("CORRESP", corresp)
 
+        #To apply same clusters in train and test
+        if self.clustering:
+            self.kmeans_model = kmeans_model
+            if self.kmeans_model is None:
+                self.kmeans_model, clustered_corresp = apply_kmeans_clustering(corresp, k=self.k)
+
+            else:
+                clustered_corresp = self.kmeans_model.predict(corresp).reshape(-1, 1)
+
+        """
         if self.clustering:
             clustered_corresp = apply_kmeans_clustering(corresp, k = self.k)
             print("CORRESP", clustered_corresp)
+        """
 
 
         idx = 0
@@ -172,7 +183,7 @@ def apply_kmeans_clustering(data, k=5):
     kmeans = KMeans(n_clusters=k, random_state=0)
     clusters = kmeans.fit_predict(data)
     
-    return clusters.reshape(-1, 1)
+    return kmeans, clusters.reshape(-1, 1)
 
 
 #dir = '/Users/mathieugierski/Nextcloud/Macbook M3/vision/data_treated_task2'
