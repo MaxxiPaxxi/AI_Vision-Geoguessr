@@ -20,23 +20,22 @@ from lightning.pytorch.loggers import MLFlowLogger
 from collections import Counter
 import matplotlib.pyplot as plt
 
-from data_augmentation2 import ImageDataset_2
+from task2_dataset import ImageDataset_task2
 
 import torchmetrics
+import utm
 
 import copy
 
-import torchmetrics
-
-batch_size = 512  # Define your batch size
+batch_size = 64  # Define your batch size
 
 ############################################# 1.
-class Classifier(pl.LightningModule):
-    def __init__(self, a, b, c, d, n_classes, cam):
+class Location_regressor(pl.LightningModule):
+    def __init__(self, a, b, c, n_classes):
         super().__init__()
 
         self.epochh=0
-        self.cam = cam
+        self.n_classes = n_classes
 
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
@@ -57,7 +56,7 @@ class Classifier(pl.LightningModule):
 
         ###
         #Without cam
-        self.conv5 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=(2, 5))
+        self.conv5 = nn.Conv2d(in_channels=b, out_channels=c, kernel_size=(5, 10))
         self.norm5 = nn.BatchNorm2d(c)
 
         self.linear = nn.Linear(c, n_classes)
@@ -112,9 +111,10 @@ class Classifier(pl.LightningModule):
 
         out = self(batch[0])
 
-        print("HELLOOOOOO", batch[0].shape, out.shape, batch[-1].shape)
+        #print("BATCHY BATCH",  batch[0].shape, out.shape, batch[-1].shape)
+        target = batch[2].to(torch.int64)
 
-        return self.L(out, batch[-1])
+        return self.L(out, target)
     
 
     def training_step(self,batch, batch_idx):
@@ -123,8 +123,8 @@ class Classifier(pl.LightningModule):
         loss = self._step(batch, batch_idx)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
-        print("HOHOHOHO", self(batch[0]).shape, torch.max(self(batch[0])), batch[-1].shape, torch.max(batch[-1]), batch[-1].dtype)
-        self.train_acc(self(batch[0]), batch[-1] )
+        #print("HOHOHOHO", self(batch[0]).shape, torch.max(self(batch[0])), batch[-1].shape, torch.max(batch[-1]))
+        self.train_acc(self(batch[0]),batch[-1].to(torch.int64) )
         self.log('train_acc', self.train_acc, on_step=True, on_epoch=True)
         return loss
     
@@ -134,8 +134,8 @@ class Classifier(pl.LightningModule):
         val_loss = self._step(batch, batch_idx)
         self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
-        print("HOHOHOHO", self(batch[0]).shape, torch.max(self(batch[0])), batch[-1].shape, torch.max(batch[-1]), batch[-1].dtype) 
-        self.val_acc(self(batch[0]), batch[-1] )
+        #print("HOHOHOHO", self(batch[0]).shape, torch.max(self(batch[0])), batch[-1].shape, torch.max(batch[-1]))
+        self.val_acc(self(batch[0]), (batch[-1]).to(torch.int64))
         self.log('val_acc', self.val_acc, on_step=True, on_epoch=True)
         return val_loss
 
@@ -147,68 +147,83 @@ class Classifier(pl.LightningModule):
     
     def on_train_epoch_start(self):
 
-        #To evaluate the model:
-        if self.epochh!=0:
-            self.eval()  # Make sure the model is in evaluation mode
-            y_true = []
-            y_pred = []
+        self.eval() 
+        bary = compute_barycenters(test_dataset, self.n_classes)
+        y_true = []
+        y_pred = []
 
-            with torch.no_grad():
-                for i in range(len(test_dataset)):
+        with torch.no_grad():
+            for i in range(len(test_dataset)):
 
-                    print(i/len(test_dataset))
-                    x, y = test_dataset[i]
-                    x = x.unsqueeze(0)  # Assuming x needs to be batched
-                    output = self(x)  # Get model output
-                    _, predicted = torch.max(output, 1)  # Convert output to predicted class index
-                    y_true.append(y)
-                    y_pred.append(predicted.item())
+                #print(i/len(test_dataset))
+                x, y, _ = test_dataset[i] #Don't need the cluster when computing the distances
+                #print(y.shape)
+                x = x.unsqueeze(0)  # Assuming x needs to be batched
+                output = self(x).view(-1)
+                #print(output.shape)
 
-            plot_mispredictions(np.array(y_true), np.array(y_pred))
-            self.epochh+=1
+                y_true.append(y.detach().cpu().numpy())
+                y_pred.append(bary[int(torch.argmax(output))].detach().cpu().numpy())
 
-        else:
-            self.epochh+=1
+        #compute_distances(y_true, y_pred)
+        #print("MEAN DISTANCEEE", compute_distances(y_true, y_pred))
+        self.log("avg_error_dist", compute_distances(y_true, y_pred), on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
     
+def compute_barycenters(dataset, k):
+    # Assuming your dataset has a method to return all items in a cluster
+    # and that there's a known list of clusters
+    barycenters = {}
 
-def plot_mispredictions(y_true, y_pred):
-    # Invert the class dictionary to map indices to class names
-    index_to_class = {v: k for k, v in test_dataset.class_to_idx.items()}
+    for classe in range(k):
+
+        elements = None
+
+        for i in range(len(dataset)):
+
+            #print("HOLAAAA", dataset[i][1].shape)
+            
+            if dataset[i][2]==classe:
+                if elements is None:
+                    elements = dataset[i][1].view(1, -1)
+                else:
+                    elements = torch.cat((elements, dataset[i][1].view(1, -1)), axis=0)
+                    
+        if elements is None:
+            elements = torch.zeros((1,2))
+
+        elements *= 3.1415/180
+        barycenters[classe] = torch.mean(elements, axis=0)
+
+    #print(barycenters)
+    return barycenters
+
+def compute_distances(y_true, y_pred):
+
+    # Ensure y_true and y_pred are numpy arrays
+    y_true = np.array(y_true)*test_dataset.stds+test_dataset.means
+    y_pred = np.array(y_pred)*test_dataset.stds+test_dataset.means
+
+    utm_coords = []
+    for lat, lon in y_true:
+        utm_coords.append((lat*3.1415/180, lon*3.1415/180))
+
+    y_true = np.array(utm_coords)
+
+    utm_coords = []
+    for lat, lon in y_pred:
+
+        utm_coords.append((lat*3.1415/180, lon*3.1415/180))
+
+    y_pred = np.array(utm_coords)
+
+
+    #print(y_true.shape)
     
-    num_classes = len(test_dataset.class_to_idx)
-    # Initialize confusion matrix
-    confusion_matrix = np.zeros((num_classes, num_classes))
-
-    # Populate confusion matrix
-    for true, pred in zip(y_true, y_pred):
-        confusion_matrix[true, pred] += 1
-
-    # Plotting
-    fig, axs = plt.subplots(1, 2, figsize=(20, 8))
-    class_names = [index_to_class[i] for i in range(num_classes)]  # Sorted class names by index
-
-    for i in range(num_classes):
-        # Mispredicted as other classes
-        mispred_as_others = np.sum(confusion_matrix[i, :]) - confusion_matrix[i, i]
-        # Mispredicted from other classes
-        mispred_from_others = np.sum(confusion_matrix[:, i]) - confusion_matrix[i, i]
-
-        axs[0].bar(class_names[i], mispred_as_others, color='skyblue')
-        axs[1].bar(class_names[i], mispred_from_others, color='lightgreen')
-
-    axs[0].set_title('Number of times each class was misclassified as another class')
-    axs[1].set_title('Number of times other classes were misclassified as this class')
-    for ax in axs:
-        ax.set_ylabel('Number of Mispredictions')
-        ax.set_xlabel('Class')
-        ax.set_xticklabels(class_names, rotation=45)
-
-    plt.tight_layout()
-    plt.show()
-
-# After collecting y_true and y_pred
-# plot_mispredictions(y_true, y_pred, class_names)
-
+    # Calculate the differences in longitude and latitude
+    diff = np.sqrt((y_pred[:,0] - y_true[:,0])**2+(y_pred[:,1] - y_true[:,1])**2)
+    
+    return np.sum(diff)
 
 
 ######################### 2.
@@ -232,58 +247,25 @@ def split_files_by_class(root_dir):
         class_path = os.path.join(root_dir, class_dir)
         files = get_files_from_directory(class_path)
 
-        if len(files)>60:
+        if len(files)>1:
 
             total+=1
 
             # Perform the split
-            class_train, class_test = train_test_split(files, test_size=0.3)
+            class_train, class_test = train_test_split(files, test_size=0.3, random_state=2)
             
             train_files.extend(class_train)
             test_files.extend(class_test)
 
-    print("total", total)
+    #print("total", total)
     
     return train_files, test_files, total
 
-dir = '/Users/mathieugierski/Nextcloud/Macbook M3/vision/data_treated'
-train_files, test_files, n_classes = split_files_by_class(dir)
+dir = '/Users/mathieugierski/Nextcloud/Macbook M3/vision/data_treated_task2'
+train_files, test_files, _ = split_files_by_class(dir)
+n_classes=5
+print(train_files)
 
-
-# Assuming you modify ImageDataset to accept a list of files:
-train_dataset = ImageDataset_2(train_files)
-test_dataset = ImageDataset_2(test_files)
-
-
-"""
-# Create a counter for class frequencies
-print(train_dataset.counting_classes)
-print("new:")
-print(train_dataset.new_counting_classes)
-class_counts = Counter(train_dataset.new_counting_classes)
-
-# Plotting
-classes = list(class_counts.keys())
-counts = list(class_counts.values())
-"""
-
-classes = list(train_dataset.summary.keys())
-counts = list(train_dataset.summary.values())
-
-plt.figure(figsize=(10, 6))
-plt.bar(classes, counts, color='skyblue')
-plt.xlabel('Class')
-plt.ylabel('Number of Elements')
-plt.title('Number of Elements in Each Class')
-plt.xticks(rotation=45)
-#plt.show()
-
-
-#print("Training set size:", len(train_dataset))
-#print("Test set size:", len(test_dataset))
-
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-test_loader= DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
 #Devise:
 if not torch.backends.mps.is_available():
@@ -297,19 +279,27 @@ if not torch.backends.mps.is_available():
 else:
     mps_device = torch.device("mps")
 
-epochs=100
+
+
+epochs=200
+
+k = 12
+train_dataset = ImageDataset_task2(train_files, clustering=True, k=k)
+training_kmeans = train_dataset.kmeans_model
+test_dataset = ImageDataset_task2(test_files, clustering=True, k=k, kmeans_model = training_kmeans) 
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+test_loader= DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
 def objective(trial: optuna.trial.Trial) -> float:
 
-    a = trial.suggest_int("a", 22, 23, 1)
+    a = trial.suggest_int("a", 20, 21, 1)
     b = trial.suggest_int("b", 40, 41, 1)
-    c = trial.suggest_int("c", 52, 53, 1)
+    c = trial.suggest_int("c", 50, 51, 1)
     #c = 0
     #d = trial.suggest_int("d", 10, 120, 10)
-    d=0
     #e = trial.suggest_int("e", 10, 120, 10)
 
-    model = Classifier(a, b, c, d, n_classes, cam = True)
+    model = Location_regressor(a, b, c, n_classes = k)
     model.to(mps_device)
 
     mlf_logger = MLFlowLogger(experiment_name="lightning_logs", tracking_uri="file:./ml-runs")
@@ -318,13 +308,12 @@ def objective(trial: optuna.trial.Trial) -> float:
     trainer.fit(model, train_loader , test_loader)
 
     val_acc = trainer.callback_metrics["val_acc"].item()
-
     return val_acc
 
 pruner = optuna.pruners.MedianPruner()
 
 study = optuna.create_study(direction="maximize", pruner=pruner)
-study.optimize(objective, n_trials=30)
+study.optimize(objective, n_trials=1)
 
 print(f"Number of finished trials: {len(study.trials)}")
 

@@ -60,6 +60,7 @@ class ImageDataset(Dataset):
         print("RESIZED")
 
         #Now build the image resizing with quantity required by counting classes:
+
         for file in root_dir:
             if file.lower().endswith(('.png', '.jpg', '.jpeg')):
 
@@ -114,28 +115,20 @@ class ImageDataset(Dataset):
 
         for i in range(len(self.images)):
             self.images[i] = self.transform(self.images[i]).cpu()
-
-        
-                        
+         
             
     def __len__(self):
+
         return len(self.images)
 
     def __getitem__(self, idx):
-        #img_path = self.images[idx]
-        #image = Image.open(img_path).convert('RGB')
-        #image = extract_random_patches(image, num_patches=1)[0]
-        #class_name = img_path.split("/")[-2]
-        #label = self.class_to_idx[class_name]
 
         image = self.images[idx]
         label = self.labels[idx]
-
-        #print("DEVICE", image.device)
-
-        #print("LABEL", label, image.shape)
-        #print('SHAPE', image.shape)
+        
         return image, label
+
+
 
 #################### get how many samples we want
 def max_allowed(n, maxi):

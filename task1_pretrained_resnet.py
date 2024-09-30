@@ -25,6 +25,14 @@ from data_augmentation2 import ImageDataset_2
 
 import torchmetrics
 
+from PIL import Image
+from torchvision.transforms import Compose, ConvertImageDtype, Normalize, PILToTensor, Resize
+from torchvision.transforms.functional import InterpolationMode
+import holocron
+#from holocron.models import model_from_hf_hub
+from transformers import AutoModel
+from torch.utils.data import Subset
+
 batch_size = 512  # Define your batch size
 
 ######################### 1. 
@@ -32,27 +40,52 @@ class ResNetLightning(pl.LightningModule):
     def __init__(self, num_classes):
         super(ResNetLightning, self).__init__()
 
-        self.epochh = 0
+        self.epochh = -1
         # Initialize ResNet18
-        self.model = resnet18()
-        num_ftrs = self.model.fc.in_features
-        self.model.fc = nn.Linear(num_ftrs, num_classes)
 
-        #print("state_dict", self.model.state_dict())
-        dropout_p=0.4
-        self.model.layer1 = nn.Sequential(self.model.layer1, nn.Dropout(dropout_p))
-        self.model.layer2 = nn.Sequential(self.model.layer2, nn.Dropout(dropout_p))
-        self.model.layer3 = nn.Sequential(self.model.layer3, nn.Dropout(dropout_p))
-        self.model.layer4 = nn.Sequential(self.model.layer4, nn.Dropout(dropout_p))
+        self.relu = nn.ReLU()
+
+        model_id = "frgfm/resnet18"
+        self.model = AutoModel.from_pretrained(model_id)
+        self.conv5 = nn.Conv2d(in_channels=2048, out_channels=1024, kernel_size=(3, 4), padding=1, stride=2)
+        self.norm5 = nn.BatchNorm2d(1024)
+        self.final_mlp = nn.Sequential(
+          nn.Linear(1024, 1536),
+          nn.BatchNorm1d(1536),
+          nn.ReLU(),
+          nn.Linear(1536, n_classes)
+        )
+
+        self.dropout1 = nn.Dropout(0.4)
+        self.dropout2 = nn.Dropout(0.4)
+        #self.final_mlp = nn.Linear(2048, n_classes)
+ 
+        print(self.model.state_dict().keys())
+        #self.model = resnet18()
 
         self.train_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
         self.val_acc = torchmetrics.classification.Accuracy(task="multiclass", num_classes=n_classes)
 
-        self.gap_mlp = nn.Linear(256, n_classes)
+    def forward(self, x, cam=False):
+        # Forward pass
+            
+            if self.epochh>=5:
+                with torch.no_grad():
+                    x = self.model(x).last_hidden_state
 
-    def forward(self, x):
+            else:
+                x = self.model(x).last_hidden_state
 
-        return self.model(x)
+            #print(x.shape)
+            x = self.dropout1(x)
+            x = self.relu(self.norm5(self.conv5(x)))
+            #print(x.shape)
+            x = x.view(x.shape[0], -1)
+            #print(x.shape)
+            x = self.dropout2(x)
+            x = self.final_mlp(x)
+
+            return x
 
     def training_step(self, batch, batch_idx):
         # Implement the training logic here
@@ -81,8 +114,10 @@ class ResNetLightning(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
         return optimizer
     
+    def on_train_epoch_start(self):
+        self.epochh+=1
     
-
+    
 
 
 ######################### 2.
@@ -157,6 +192,8 @@ plt.xticks(rotation=45)
 #print("Training set size:", len(train_dataset))
 #print("Test set size:", len(test_dataset))
 
+#indices = range(0, 600)
+#Subset(train_dataset, indices)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader= DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
@@ -175,9 +212,9 @@ else:
 epochs=40
 
 model = ResNetLightning(num_classes=n_classes)
-print("features", model.model.fc)
-num_ftrs = model.model.fc.in_features
-model.fc = nn.Linear(num_ftrs, n_classes)  # Assuming 10 classes in your dataset
+#print("features", model.model.fc)
+#num_ftrs = model.model.fc.in_features
+#model.fc = nn.Linear(num_ftrs, n_classes)  # Assuming 10 classes in your dataset
 model.to(mps_device)
 
 mlf_logger = MLFlowLogger(experiment_name="lightning_logs", tracking_uri="file:./ml-runs")
