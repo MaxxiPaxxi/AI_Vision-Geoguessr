@@ -1,0 +1,10 @@
+ml-runs/
+<<<<<<< HEAD
+.DS_Store
+mlruns
+plots
+124065048612676668.zip
+=======
+task_2/dataset/
+.venv/
+>>>>>>> refs/remotes/origin/maximilien
